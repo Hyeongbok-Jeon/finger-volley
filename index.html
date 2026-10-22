@@ -705,6 +705,14 @@
       document.getElementById('matchInfo').textContent = `나는 ${net.me === 0 ? '말랑(왼쪽)' : '몽글(오른쪽)'}이에요.`;
       const room = new WebSocket(`${SERVER}/room/${m.room}?role=${m.role}`);
       net.room = room;
+      // If the opponent never shows up in the room, go back to the queue.
+      setTimeout(() => {
+        if (net.room === room && !net.ready) {
+          room.onclose = null;
+          startOnline();
+          document.getElementById('matchInfo').textContent = '상대 연결이 끊겨서 다시 찾는 중이에요.';
+        }
+      }, 8000);
       room.onclose = () => { if (state.online || net.room === room) endOnline('연결이 끊겼어요.'); };
       room.onmessage = (ev) => {
         const r = JSON.parse(ev.data);
