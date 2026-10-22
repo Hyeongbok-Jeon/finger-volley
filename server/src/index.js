@@ -4,6 +4,8 @@
  *   GET /match  (WebSocket)  join the queue; when a second player arrives both
  *                             receive {type:'matched', room, role}
  *   GET /room/:id?role=host|guest  (WebSocket)  relay between the two players
+ *   GET /friend/:code  (WebSocket)  private room shared by link; the first to
+ *                             arrive becomes host, the second guest
  *
  * The host's browser runs the physics; the server only forwards messages, so
  * it stays tiny and cheap.
@@ -29,6 +31,11 @@ export default {
     const m = url.pathname.match(/^\/room\/([a-f0-9]{16,64})$/);
     if (m) {
       const id = env.ROOM.idFromName(m[1]);
+      return env.ROOM.get(id).fetch(request);
+    }
+    const f = url.pathname.match(/^\/friend\/([A-Z0-9]{4,8})$/);
+    if (f) {
+      const id = env.ROOM.idFromName(`friend-${f[1]}`);
       return env.ROOM.get(id).fetch(request);
     }
     return new Response('Not found', { status: 404 });
@@ -74,11 +81,21 @@ export class Room {
   }
 
   async fetch(request) {
-    const role = new URL(request.url).searchParams.get('role');
-    if (role !== 'host' && role !== 'guest') return new Response('Bad role', { status: 400 });
+    const open = (ws) => ws && ws.readyState === 1;
+    let role = new URL(request.url).searchParams.get('role');
+    const autoRole = role === null;
+    // Friend rooms hand out roles in arrival order.
+    if (autoRole) role = !open(this.peers.host) ? 'host' : !open(this.peers.guest) ? 'guest' : null;
 
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();
+    if (role === null) {
+      server.send(json({ type: 'full' }));
+      server.close(1000, 'full');
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    if (role !== 'host' && role !== 'guest') return new Response('Bad role', { status: 400 });
+    if (autoRole) server.send(json({ type: 'role', role }));
     const other = role === 'host' ? 'guest' : 'host';
     this.peers[role] = server;
 

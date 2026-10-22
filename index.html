@@ -110,6 +110,13 @@
   .btn.alt { background: var(--foam); box-shadow: 0 4px 0 #A9C6C8; }
   .btn.online { background: var(--mint); box-shadow: 0 4px 0 #2B8A73; color: #08251E; }
   .note { color: var(--sun); }
+  .overlay .room-code {
+    font-family: var(--display);
+    font-size: clamp(30px, 8vw, 52px);
+    letter-spacing: 0.25em;
+    color: var(--sun) !important;
+    opacity: 1 !important;
+  }
   .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #C99A2E; }
   .btn:focus-visible { outline: 3px solid var(--mint); outline-offset: 3px; }
 
@@ -162,13 +169,16 @@
       <div class="choices">
         <button class="btn" id="play1" type="button">혼자 하기</button>
         <button class="btn online" id="playOnline" type="button">온라인 대결</button>
+        <button class="btn alt" id="playFriend" type="button">친구와 하기</button>
       </div>
       <p id="menuNote" class="note" hidden></p>
     </div>
     <div class="overlay" id="matching" hidden>
       <h2 id="matchTitle">상대를 찾는 중…</h2>
       <p id="matchInfo">다른 사람이 들어오면 바로 시작해요.</p>
+      <p id="roomCode" class="room-code" hidden></p>
       <div class="choices">
+        <button class="btn" id="shareRoom" type="button" hidden>링크 보내기</button>
         <button class="btn alt" id="cancelMatch" type="button">취소</button>
       </div>
     </div>
@@ -673,7 +683,9 @@
   }
   function closeNet() {
     for (const ws of [net.lobby, net.room]) { if (ws) { ws.onclose = null; try { ws.close(); } catch {} } }
-    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remote: {}, fx: [], ready: false, overShown: false });
+    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remote: {}, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
+    document.getElementById('roomCode').hidden = true;
+    document.getElementById('shareRoom').hidden = true;
   }
   function endOnline(message) {
     closeNet();
@@ -705,6 +717,7 @@
       document.getElementById('matchInfo').textContent = `나는 ${net.me === 0 ? '말랑(왼쪽)' : '몽글(오른쪽)'}이에요.`;
       const room = new WebSocket(`${SERVER}/room/${m.room}?role=${m.role}`);
       net.room = room;
+      attachRoom(room);
       // If the opponent never shows up in the room, go back to the queue.
       setTimeout(() => {
         if (net.room === room && !net.ready) {
@@ -713,18 +726,94 @@
           document.getElementById('matchInfo').textContent = '상대 연결이 끊겨서 다시 찾는 중이에요.';
         }
       }, 8000);
-      room.onclose = () => { if (state.online || net.room === room) endOnline('연결이 끊겼어요.'); };
-      room.onmessage = (ev) => {
-        const r = JSON.parse(ev.data);
-        if (r.type === 'ready' && !net.ready) beginOnline();
-        else if (r.type === 'left') endOnline('상대가 나갔어요.');
-        else if (r.t === 'i' && net.role === 'host') {
-          // Keep one-shot presses until the physics step consumes them.
-          const prev = net.remote;
-          net.remote = { ...r.c, upPressed: !!(prev.upPressed || r.c.upPressed), hitPressed: !!(prev.hitPressed || r.c.hitPressed) };
-        } else if (r.t === 's' && net.role === 'guest') applySnapshot(r);
-      };
     };
+  }
+
+  function attachRoom(room) {
+    room.onclose = () => { if (state.online || net.room === room) endOnline('연결이 끊겼어요.'); };
+    room.onerror = () => { if (net.room === room) endOnline('서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.'); };
+    room.onmessage = (ev) => {
+      const r = JSON.parse(ev.data);
+      if (r.type === 'role') {
+        net.role = r.role; net.me = r.role === 'host' ? 0 : 1;
+      } else if (r.type === 'full') {
+        endOnline('이미 두 명이 들어간 방이에요.');
+      } else if (r.type === 'ready' && !net.ready) {
+        if (net.friend) {
+          document.getElementById('matchTitle').textContent = '친구가 들어왔어요!';
+          document.getElementById('matchInfo').textContent = `나는 ${net.me === 0 ? '말랑(왼쪽)' : '몽글(오른쪽)'}이에요.`;
+          document.getElementById('shareRoom').hidden = true;
+        }
+        beginOnline();
+      } else if (r.type === 'left') {
+        endOnline(net.friend ? '친구가 나갔어요.' : '상대가 나갔어요.');
+      } else if (r.t === 'i' && net.role === 'host') {
+        // Keep one-shot presses until the physics step consumes them.
+        const prev = net.remote;
+        net.remote = { ...r.c, upPressed: !!(prev.upPressed || r.c.upPressed), hitPressed: !!(prev.hitPressed || r.c.hitPressed) };
+      } else if (r.t === 's' && net.role === 'guest') {
+        applySnapshot(r);
+      } else if (r.t === 'again') {
+        net.peerAgain = true;
+        maybeRestart();
+      } else if (r.t === 'restart' && net.role === 'guest') {
+        restartFriendGame();
+      }
+    };
+  }
+
+  // ---- Friends: a private room shared by link ----
+  const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  function newRoomCode() {
+    let c = '';
+    for (let i = 0; i < 4; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    return c;
+  }
+  function roomLink(code) {
+    return `${location.origin}${location.pathname}?room=${code}`;
+  }
+  function startFriend(code, creator) {
+    ensureAudio();
+    closeNet();
+    net.friend = true; net.code = code;
+    menu.hidden = true; over.hidden = true; matching.hidden = false;
+    document.getElementById('matchTitle').textContent = creator ? '친구를 기다리는 중…' : '친구 방에 들어가는 중…';
+    document.getElementById('matchInfo').textContent = creator ? '아래 코드나 링크를 친구에게 보내 주세요.' : '';
+    const codeEl = document.getElementById('roomCode');
+    codeEl.textContent = code; codeEl.hidden = false;
+    document.getElementById('shareRoom').hidden = !creator;
+    let room;
+    try { room = new WebSocket(`${SERVER}/friend/${code}`); } catch { endOnline('서버에 연결할 수 없어요.'); return; }
+    net.room = room;
+    attachRoom(room);
+  }
+  async function shareRoom() {
+    const url = roomLink(net.code);
+    const info = document.getElementById('matchInfo');
+    try {
+      if (navigator.share) { await navigator.share({ title: '손가락 배구', text: '손가락 배구 한 판 할래?', url }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(url); info.textContent = '링크를 복사했어요. 친구에게 붙여 넣어 보내 주세요.'; }
+    catch { info.textContent = url; }
+  }
+  // Rematch with the same friend once both players press "한 판 더".
+  function requestAgain() {
+    net.wantAgain = true;
+    send(net.room, { t: 'again' });
+    document.getElementById('final').textContent = '친구가 누르면 바로 시작해요…';
+    maybeRestart();
+  }
+  function maybeRestart() {
+    if (!net.wantAgain || !net.peerAgain || net.role !== 'host') return;
+    send(net.room, { t: 'restart' });
+    restartFriendGame();
+  }
+  function restartFriendGame() {
+    net.wantAgain = net.peerAgain = false;
+    net.overShown = false;
+    startGame(false);
+    state.online = true;
+    if (net.role === 'host') resetRally(Math.random() < 0.5 ? 0 : 1);
   }
   function beginOnline() {
     net.ready = true;
@@ -987,7 +1076,7 @@
     if (state.online) {
       const iWon = (a > b) === (net.me === 0);
       document.getElementById('winner').textContent = iWon ? '내가 이겼어요!' : '아쉽게 졌어요';
-      document.getElementById('again').textContent = '새 상대 찾기';
+      document.getElementById('again').textContent = net.friend ? '한 판 더' : '새 상대 찾기';
     } else {
       document.getElementById('winner').textContent = a > b ? '말랑 승리!' : (state.single ? '몽글(컴퓨터) 승리!' : '몽글 승리!');
       document.getElementById('again').textContent = '한 판 더';
@@ -1001,7 +1090,13 @@
     document.getElementById('pause').textContent = state.paused ? '계속하기' : '일시정지';
   }
   document.getElementById('play1').addEventListener('click', () => startGame(true));
-  document.getElementById('again').addEventListener('click', () => (state.online ? startOnline() : startGame(state.single)));
+  document.getElementById('again').addEventListener('click', () => {
+    if (state.online && net.friend) requestAgain();
+    else if (state.online) startOnline();
+    else startGame(state.single);
+  });
+  document.getElementById('playFriend').addEventListener('click', () => startFriend(newRoomCode(), true));
+  document.getElementById('shareRoom').addEventListener('click', shareRoom);
   document.getElementById('toMenu').addEventListener('click', () => {
     if (state.online) { endOnline(); return; }
     state.mode = 'menu'; over.hidden = true; menu.hidden = false; resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
@@ -1017,6 +1112,9 @@
   resize();
   resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
   requestAnimationFrame(frame);
+  // Opened from a friend's invite link: join their room right away.
+  const invite = (params.get('room') || '').toUpperCase();
+  if (/^[A-Z0-9]{4,8}$/.test(invite)) startFriend(invite, false);
 })();
 </script>
 
