@@ -507,23 +507,20 @@
     b.y = pl.y - 4 + (dy / (dist || 1)) * push;
   }
 
-  function updateBall(step) {
-    const b = state.ball;
+  // `predict` is the guest's local copy: same physics, but the ground only
+  // bounces the ball; the host alone decides points.
+  // Gravity, walls, ceiling and net for any ball-like {x, y, vx, vy}.
+  // Returns true when the ball struck the net.
+  function moveBall(b, step) {
     b.vy += B_GRAV * step;
     const sp = Math.hypot(b.vx, b.vy);
     if (sp > B_MAX) { b.vx *= B_MAX / sp; b.vy *= B_MAX / sp; }
     b.x += b.vx * step; b.y += b.vy * step;
-    b.spin += b.vx * 0.06 * step;
-    b.power = Math.max(0, b.power - step);
-    if (b.power > 0 || sp > 8.5) { b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 10) b.trail.shift(); }
-    else if (b.trail.length) b.trail.shift();
 
-    // Walls and ceiling
     if (b.x < BR) { b.x = BR; b.vx = Math.abs(b.vx) * 0.9; }
     if (b.x > W - BR) { b.x = W - BR; b.vx = -Math.abs(b.vx) * 0.9; }
     if (b.y < BR) { b.y = BR; b.vy = Math.abs(b.vy) * 0.6; }
 
-    // Net post with a rounded cap
     if (b.y + BR > NET_TOP && Math.abs(b.x - NET_X) < NET_HALF + BR) {
       if (b.y < NET_TOP + 6 && b.vy > 0) {
         b.y = NET_TOP - BR; b.vy = -Math.abs(b.vy) * 0.7; b.vx += (b.x < NET_X ? -1 : 1) * 1.2;
@@ -531,11 +528,24 @@
         b.x = b.x < NET_X ? NET_X - NET_HALF - BR : NET_X + NET_HALF + BR;
         b.vx = -b.vx * 0.75;
       }
-      sfx.land();
+      return true;
     }
+    return false;
+  }
+
+  function updateBall(step, predict = false) {
+    const b = state.ball;
+    if (moveBall(b, step)) sfx.land();
+    const sp = Math.hypot(b.vx, b.vy);
+    b.spin += b.vx * 0.06 * step;
+    b.power = Math.max(0, b.power - step);
+    if (b.power > 0 || sp > 8.5) { b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 10) b.trail.shift(); }
+    else if (b.trail.length) b.trail.shift();
 
     // Ground: point to the other side
-    if (b.y + BR >= GROUND) {
+    if (predict && b.y + BR >= GROUND) {
+      b.y = GROUND - BR; b.vy = -Math.abs(b.vy) * 0.35; b.vx *= 0.5;
+    } else if (b.y + BR >= GROUND) {
       b.y = GROUND - BR;
       const scorer = b.x < NET_X ? 1 : 0;
       scorePoint(scorer);
@@ -635,7 +645,7 @@
       t: 's',
       p: state.p.map((pl) => [r1(pl.x), r1(pl.y), r1(pl.vx), r1(pl.vy), pl.ground ? 1 : 0, pl.dive, pl.diveDir, r1(pl.squash), pl.hitFlash]),
       b: [r1(state.ball.x), r1(state.ball.y), r1(state.ball.vx), r1(state.ball.vy), r1(state.ball.spin), state.ball.power],
-      sc: state.score, fz: state.freeze, sl: state.slow, md: state.mode, rl: state.rally,
+      sc: state.score, fz: state.freeze, sl: state.slow, md: state.mode, rl: state.rally, f: state.t,
       fx: net.fx.splice(0),
     });
   }
@@ -653,17 +663,33 @@
   function applySnapshot(m) {
     const newRally = m.rl !== net.rl;
     net.rl = m.rl;
+    // How many frames old this snapshot is. Packets arrive unevenly, so
+    // rather than trusting each arrival time, keep a steady estimate of the
+    // host's frame clock and measure every snapshot against it.
+    const sample = m.f + (net.rtt || 0) / 2 / (1000 / 60) - state.t;
+    net.clk = net.clk == null || Math.abs(sample - net.clk) > 30 ? sample : net.clk * 0.95 + sample * 0.05;
+    const ahead = Math.max(0, Math.min(15, Math.round(state.t + net.clk - m.f)));
     m.p.forEach((a, i) => {
       const pl = state.p[i];
       if (i === net.me && !newRally) return; // my own character is driven locally
-      if (i === net.me) { pl.x = a[0]; pl.y = a[1]; pl.ox = pl.oy = 0; } else smoothTo(pl, a[0], a[1]);
+      if (i === net.me) { pl.x = a[0]; pl.y = a[1]; pl.ox = pl.oy = 0; } else smoothTo(pl, a[0] + a[2] * ahead, Math.min(STAND_Y, a[1] + a[3] * ahead));
       setPose(pl, a);
     });
+    // Right after my own hit, the host's older snapshots still show the ball
+    // before the hit; trust my prediction until the host catches up.
     const b = state.ball;
-    smoothTo(b, m.b[0], m.b[1]);
-    [, , b.vx, b.vy, b.spin, b.power] = m.b;
+    if (performance.now() - (net.localHit?.at || 0) > 250 || newRally) {
+      // Run the snapshot forward to "now" before comparing, so corrections
+      // don't drag the ball backwards.
+      const live = { x: m.b[0], y: m.b[1], vx: m.b[2], vy: m.b[3] };
+      if (m.fz === 0) for (let i = 0; i < ahead && live.y + BR < GROUND; i++) moveBall(live, state.slow > 0 ? 0.35 : 1);
+      smoothTo(b, live.x, live.y);
+      b.vx = live.vx; b.vy = live.vy; b.spin = m.b[4]; b.power = m.b[5];
+    }
     state.score = m.sc; state.freeze = m.fz; state.slow = m.sl;
     for (const f of m.fx || []) {
+      const echoedHit = f.s === net.localHit?.s && performance.now() - net.localHit.at < 350;
+      if (echoedHit) continue;
       if (f.s && sfx[f.s]) sfx[f.s]();
       if (f.b) burst(...f.b);
       if (f.p) state.popups.push(f.p);
@@ -680,6 +706,7 @@
     net.pendHit = !!(net.pendHit || me.wantsHit);
     net.pendUp = !!(net.pendUp || me.aimUp);
     net.pendDown = !!(net.pendDown || me.aimDown);
+    if (net.sendTick % 60 === 0) send(net.room, { t: 'ping', ts: performance.now() });
     if (++net.sendTick % 2 === 0) {
       send(net.room, {
         t: 'i', rl: net.rl,
@@ -688,12 +715,25 @@
       });
       net.pendHit = net.pendUp = net.pendDown = false;
     }
+    // The ball runs the same physics here as on the host (walls, net,
+    // bounces), and my own hits take effect at once. Snapshots then only
+    // nudge away small differences.
     const k = state.slow > 0 ? 0.35 : 1;
-    const b = state.ball;
-    b.vy += B_GRAV * k; b.x += b.vx * k; b.y += b.vy * k; b.spin += b.vx * 0.06 * k;
-    if (b.y + BR > GROUND) b.y = GROUND - BR;
-    if (b.power > 0 || Math.hypot(b.vx, b.vy) > 8.5) { b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 10) b.trail.shift(); }
-    else if (b.trail.length) b.trail.shift();
+    if (state.freeze === 0 && state.mode === 'play') {
+      if (state.cool > 0) state.cool--;
+      // The opponent's touches are guessed too (as a bump, since a smash
+      // isn't known yet), so the ball doesn't fly through them and jump back.
+      const other = state.p[1 - net.me];
+      other.toward = -other.side; other.wantsHit = false;
+      for (const pl of [me, other]) {
+        const before = state.cool;
+        hitBall(pl);
+        if (state.cool > before) net.localHit = { at: performance.now(), s: pl.wantsHit ? 'spike' : 'bump' };
+      }
+      updateBall(k, true);
+    } else {
+      updateBallFree(k);
+    }
     const other = state.p[1 - net.me];
     other.x += other.vx;
     if (!other.ground) { other.vy += P_GRAV; other.y = Math.min(STAND_Y, other.y + other.vy); }
@@ -720,7 +760,7 @@
   }
   function closeNet() {
     for (const ws of [net.lobby, net.room]) { if (ws) { ws.onclose = null; try { ws.close(); } catch {} } }
-    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, pendHit: false, pendUp: false, pendDown: false, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
+    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, rtt: 0, clk: null, localHit: null, pendHit: false, pendUp: false, pendDown: false, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
     document.getElementById('roomCode').hidden = true;
     document.getElementById('shareRoom').hidden = true;
   }
@@ -789,6 +829,11 @@
         if (r.pose && r.rl === state.rally) net.remotePose = r;
       } else if (r.t === 's' && net.role === 'guest') {
         applySnapshot(r);
+      } else if (r.t === 'ping') {
+        send(room, { t: 'pong', ts: r.ts });
+      } else if (r.t === 'pong') {
+        const rtt = performance.now() - r.ts;
+        net.rtt = net.rtt ? net.rtt * 0.7 + rtt * 0.3 : rtt;
       } else if (r.t === 'again') {
         net.peerAgain = true;
         maybeRestart();
@@ -1153,6 +1198,8 @@
   resize();
   resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
   requestAnimationFrame(frame);
+  // ?debug exposes the game state for troubleshooting from the console.
+  if (params.has('debug')) window.__fv = { state, net };
   // Opened from a friend's invite link: join their room right away.
   const invite = (params.get('room') || '').toUpperCase();
   if (/^[A-Z0-9]{4,8}$/.test(invite)) startFriend(invite, false);
