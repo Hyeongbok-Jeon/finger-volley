@@ -15,4 +15,4 @@
 cd server
 npx wrangler deploy
 ```
-배포 후 나온 주소(`wss://malang-volley.<계정>.workers.dev`)를 `index.html`의 `SERVER`에 넣어요.
+배포 후 나온 주소(`wss://finger-volley.<계정>.workers.dev`)를 `index.html`의 `SERVER`에 넣어요.

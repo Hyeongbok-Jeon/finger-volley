@@ -256,7 +256,7 @@
   // sends only its controls and draws what the host sends.
   const params = new URLSearchParams(location.search);
   const SERVER = params.get('server') ||
-    (['localhost', '127.0.0.1'].includes(location.hostname) ? 'ws://127.0.0.1:8787' : 'wss://malang-volley.REPLACE_ME.workers.dev');
+    (['localhost', '127.0.0.1'].includes(location.hostname) ? 'ws://127.0.0.1:8787' : 'wss://finger-volley.REPLACE_ME.workers.dev');
   const net = { lobby: null, room: null, role: null, me: 0, remote: {}, fx: [], ready: false, sendTick: 0, overShown: false };
 
   for (const name of Object.keys(sfx)) {
