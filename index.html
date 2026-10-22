@@ -267,7 +267,7 @@
   const params = new URLSearchParams(location.search);
   const SERVER = params.get('server') ||
     (['localhost', '127.0.0.1'].includes(location.hostname) ? 'ws://127.0.0.1:8787' : 'wss://finger-volley.shekel-vrooms-7p.workers.dev');
-  const net = { lobby: null, room: null, role: null, me: 0, remote: {}, fx: [], ready: false, sendTick: 0, overShown: false };
+  const net = { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, fx: [], ready: false, sendTick: 0, overShown: false };
 
   for (const name of Object.keys(sfx)) {
     const play = sfx[name];
@@ -363,11 +363,13 @@
   for (let i = 0; i < 5; i++) state.clouds.push({ x: Math.random() * W, y: 20 + Math.random() * 60, s: 0.6 + Math.random() * 0.8, v: 0.08 + Math.random() * 0.12 });
 
   function resetRally(serverIdx) {
+    state.rally = (state.rally || 0) + 1;
     state.p = [makePlayer(-1), makePlayer(1)];
     const sx = serverIdx === 0 ? W * 0.22 : W * 0.78;
     Object.assign(state.ball, { x: sx, y: 50, vx: 0, vy: 0, spin: 0, trail: [], power: 0 });
     state.server = serverIdx;
     state.cool = 0;
+    net.remotePose = null;
   }
   function startGame(single) {
     ensureAudio();
@@ -401,12 +403,7 @@
   }
 
   function controlFor(i) {
-    if (state.online) {
-      if (i === net.me) return localControl();
-      const r = net.remote;
-      net.remote = { ...r, upPressed: false, hitPressed: false };
-      return r;
-    }
+    if (state.online) return localControl(); // only ever asked for my own character
     if (i === 1 && state.single) return aiControl();
     if (i === 0 && touch.id !== null) return touchControl();
     if (i === 0 && touch.smash > 0) return touchControl();
@@ -618,8 +615,10 @@
       updateBallFree(slowFactor);
       if (state.freeze === 0 && state.mode === 'play') resetRally(state.nextServer);
     } else if (state.mode === 'play') {
-      updatePlayer(state.p[0], controlFor(0), 0);
-      updatePlayer(state.p[1], controlFor(1), 1);
+      for (const i of [0, 1]) {
+        if (state.online && i !== net.me) applyRemotePose(state.p[i]);
+        else updatePlayer(state.p[i], controlFor(i), i);
+      }
       if (state.cool > 0) state.cool--;
       hitBall(state.p[0]); hitBall(state.p[1]);
       updateBall(slowFactor);
@@ -636,17 +635,33 @@
       t: 's',
       p: state.p.map((pl) => [r1(pl.x), r1(pl.y), r1(pl.vx), r1(pl.vy), pl.ground ? 1 : 0, pl.dive, pl.diveDir, r1(pl.squash), pl.hitFlash]),
       b: [r1(state.ball.x), r1(state.ball.y), r1(state.ball.vx), r1(state.ball.vy), r1(state.ball.spin), state.ball.power],
-      sc: state.score, fz: state.freeze, sl: state.slow, md: state.mode,
+      sc: state.score, fz: state.freeze, sl: state.slow, md: state.mode, rl: state.rally,
       fx: net.fx.splice(0),
     });
   }
+  // Snap to a new authoritative position but keep drawing from where the
+  // object appeared to be, then let that visual offset melt away.
+  function smoothTo(o, x, y) {
+    o.ox = (o.ox || 0) + o.x - x;
+    o.oy = (o.oy || 0) + o.y - y;
+    if (Math.hypot(o.ox, o.oy) > 80) { o.ox = 0; o.oy = 0; }
+    o.x = x; o.y = y;
+  }
+  function setPose(pl, a) {
+    pl.vx = a[2]; pl.vy = a[3]; pl.ground = !!a[4]; pl.dive = a[5]; pl.diveDir = a[6]; pl.squash = a[7]; pl.hitFlash = a[8];
+  }
   function applySnapshot(m) {
+    const newRally = m.rl !== net.rl;
+    net.rl = m.rl;
     m.p.forEach((a, i) => {
       const pl = state.p[i];
-      [pl.x, pl.y, pl.vx, pl.vy] = a; pl.ground = !!a[4]; pl.dive = a[5]; pl.diveDir = a[6]; pl.squash = a[7]; pl.hitFlash = a[8];
+      if (i === net.me && !newRally) return; // my own character is driven locally
+      if (i === net.me) { pl.x = a[0]; pl.y = a[1]; pl.ox = pl.oy = 0; } else smoothTo(pl, a[0], a[1]);
+      setPose(pl, a);
     });
     const b = state.ball;
-    [b.x, b.y, b.vx, b.vy, b.spin, b.power] = m.b;
+    smoothTo(b, m.b[0], m.b[1]);
+    [, , b.vx, b.vy, b.spin, b.power] = m.b;
     state.score = m.sc; state.freeze = m.fz; state.slow = m.sl;
     for (const f of m.fx || []) {
       if (f.s && sfx[f.s]) sfx[f.s]();
@@ -658,12 +673,20 @@
   }
   // Between snapshots the guest keeps things moving along their last velocity.
   function guestStep() {
-    // Send controls 30 times a second; one-shot presses are kept until sent.
-    const c = localControl();
-    net.pending = { upPressed: !!(net.pending?.upPressed || c.upPressed), hitPressed: !!(net.pending?.hitPressed || c.hitPressed) };
+    // My character moves on my own phone right away; its pose goes to the
+    // host 30 times a second. A smash stays requested until it is sent.
+    const me = state.p[net.me];
+    if (state.freeze === 0 && state.mode === 'play') updatePlayer(me, localControl(), net.me);
+    net.pendHit = !!(net.pendHit || me.wantsHit);
+    net.pendUp = !!(net.pendUp || me.aimUp);
+    net.pendDown = !!(net.pendDown || me.aimDown);
     if (++net.sendTick % 2 === 0) {
-      send(net.room, { t: 'i', c: { ...c, ...net.pending } });
-      net.pending = null;
+      send(net.room, {
+        t: 'i', rl: net.rl,
+        pose: [r1(me.x), r1(me.y), r1(me.vx), r1(me.vy), me.ground ? 1 : 0, me.dive, me.diveDir, r1(me.squash), me.hitFlash],
+        h: net.pendHit ? 1 : 0, au: net.pendUp ? 1 : 0, ad: net.pendDown ? 1 : 0,
+      });
+      net.pendHit = net.pendUp = net.pendDown = false;
     }
     const k = state.slow > 0 ? 0.35 : 1;
     const b = state.ball;
@@ -671,11 +694,25 @@
     if (b.y + BR > GROUND) b.y = GROUND - BR;
     if (b.power > 0 || Math.hypot(b.vx, b.vy) > 8.5) { b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 10) b.trail.shift(); }
     else if (b.trail.length) b.trail.shift();
-    for (const pl of state.p) {
-      pl.x += pl.vx * 0.5; pl.y = Math.min(STAND_Y, pl.y + pl.vy * 0.5);
-      pl.blink = (pl.blink + 1) % 240;
-    }
+    const other = state.p[1 - net.me];
+    other.x += other.vx;
+    if (!other.ground) { other.vy += P_GRAV; other.y = Math.min(STAND_Y, other.y + other.vy); }
+    other.blink = (other.blink + 1) % 240;
     tickEffects();
+  }
+
+  // Host side: place the guest's character where the guest's phone says it is.
+  function applyRemotePose(pl) {
+    const r = net.remotePose;
+    pl.blink = (pl.blink + 1) % 240;
+    pl.toward = -pl.side;
+    if (!r) { pl.wantsHit = false; return; }
+    smoothTo(pl, r.pose[0], r.pose[1]);
+    setPose(pl, r.pose);
+    pl.wantsHit = !!r.h; pl.aimUp = !!r.au; pl.aimDown = !!r.ad;
+    // Between messages keep moving along the last velocity.
+    r.pose[0] += r.pose[2]; r.pose[1] = Math.min(STAND_Y, r.pose[1] + r.pose[3]);
+    r.h = r.au = r.ad = 0;
   }
 
   function send(ws, msg) {
@@ -683,7 +720,7 @@
   }
   function closeNet() {
     for (const ws of [net.lobby, net.room]) { if (ws) { ws.onclose = null; try { ws.close(); } catch {} } }
-    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remote: {}, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
+    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, pendHit: false, pendUp: false, pendDown: false, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
     document.getElementById('roomCode').hidden = true;
     document.getElementById('shareRoom').hidden = true;
   }
@@ -748,9 +785,8 @@
       } else if (r.type === 'left') {
         endOnline(net.friend ? '친구가 나갔어요.' : '상대가 나갔어요.');
       } else if (r.t === 'i' && net.role === 'host') {
-        // Keep one-shot presses until the physics step consumes them.
-        const prev = net.remote;
-        net.remote = { ...r.c, upPressed: !!(prev.upPressed || r.c.upPressed), hitPressed: !!(prev.hitPressed || r.c.hitPressed) };
+        // Ignore poses from before the last reset so the serve starts clean.
+        if (r.pose && r.rl === state.rally) net.remotePose = r;
       } else if (r.t === 's' && net.role === 'guest') {
         applySnapshot(r);
       } else if (r.t === 'again') {
@@ -834,6 +870,7 @@
   }
   function tickEffects() {
     state.shake *= 0.85;
+    for (const o of [state.p[0], state.p[1], state.ball]) { o.ox = (o.ox || 0) * 0.72; o.oy = (o.oy || 0) * 0.72; }
     for (const p of state.particles) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= 0.03; }
     state.particles = state.particles.filter((p) => p.life > 0);
     for (const p of state.popups) { p.y -= 0.6; p.life -= 0.015; }
@@ -1035,9 +1072,13 @@
     if (state.shake > 0.5) ctx.translate((Math.random() - 0.5) * state.shake, (Math.random() - 0.5) * state.shake);
     drawScene();
     drawNet();
+    // Draw at the smoothed position, then restore the real one.
+    const moved = [state.p[0], state.p[1], state.ball];
+    for (const o of moved) { o.x += o.ox || 0; o.y += o.oy || 0; }
     drawPlayer(state.p[0], 0);
     drawPlayer(state.p[1], 1);
     drawBall();
+    for (const o of moved) { o.x -= o.ox || 0; o.y -= o.oy || 0; }
     for (const p of state.particles) {
       ctx.globalAlpha = Math.max(0, p.life);
       ctx.fillStyle = p.color;
