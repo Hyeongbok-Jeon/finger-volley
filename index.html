@@ -1,0 +1,1007 @@
+<title>말랑 배구</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=IBM+Plex+Sans+KR:wght@400;600&display=swap">
+<style>
+  /* Layout: one centered court card on a dusk-ocean page; the canvas is the hero,
+     controls sit under it and turn into thumb pads on touch screens. */
+  :root {
+    --ocean: #0E2A44;
+    --ocean-deep: #091C2E;
+    --foam: #EAF6F4;
+    --mist: #9FC3CC;
+    --mint: #48C3A6;
+    --peach: #FF9C7A;
+    --sun: #FFD36B;
+    --line: rgba(234, 246, 244, 0.14);
+    --display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: radial-gradient(120% 80% at 50% 0%, #17406A 0%, var(--ocean) 45%, var(--ocean-deep) 100%);
+    background-color: var(--ocean);
+    color: var(--foam);
+    font-family: var(--body);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding-block: 20px 28px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(28px, 6vw, 42px);
+    line-height: 1;
+    margin: 0;
+    letter-spacing: 0.02em;
+    text-wrap: balance;
+  }
+  h1 .m { color: var(--mint); }
+  h1 .p { color: var(--peach); }
+  .tag { color: var(--mist); font-size: 13px; }
+
+  .court {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 432 / 304;
+    max-width: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--line);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: linear-gradient(180deg, rgba(9, 28, 46, 0.35), rgba(9, 28, 46, 0.7));
+    text-align: center;
+    padding: 16px;
+  }
+  .overlay[hidden] { display: none; }
+  .overlay h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(26px, 7vw, 54px);
+    margin: 0;
+    line-height: 1.05;
+    text-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
+  }
+  .overlay p { margin: 0; color: var(--foam); opacity: 0.9; font-size: clamp(12px, 2.6vw, 15px); }
+  .choices { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    font-family: var(--display);
+    font-size: clamp(16px, 3.6vw, 20px);
+    border: 0;
+    border-radius: 999px;
+    padding: 10px 22px;
+    cursor: pointer;
+    color: #10283D;
+    background: var(--sun);
+    box-shadow: 0 4px 0 #C99A2E;
+    transition: transform 0.08s ease;
+  }
+  .btn.alt { background: var(--foam); box-shadow: 0 4px 0 #A9C6C8; }
+  .btn.online { background: var(--mint); box-shadow: 0 4px 0 #2B8A73; color: #08251E; }
+  .note { color: var(--sun); }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #C99A2E; }
+  .btn:focus-visible { outline: 3px solid var(--mint); outline-offset: 3px; }
+
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .keys { display: flex; gap: 18px; flex-wrap: wrap; color: var(--mist); font-size: 13px; }
+  .keys b { color: var(--foam); font-weight: 600; }
+  kbd {
+    font-family: var(--body);
+    font-size: 12px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    padding: 1px 6px;
+    color: var(--foam);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .small-btn {
+    font-family: var(--body);
+    font-size: 13px;
+    color: var(--foam);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  .small-btn:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+
+  .touch-help { display: none; color: var(--foam); font-size: 14px; line-height: 1.6; }
+  .touch-help b { color: var(--sun); font-weight: 600; }
+  @media (pointer: coarse) {
+    .touch-help { display: block; }
+    .keys, footer { display: none; }
+  }
+  footer { color: var(--mist); font-size: 12px; opacity: 0.8; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><span class="m">말랑</span> 배구 <span class="p">몽글</span></h1>
+    <span class="tag">15점 먼저 내면 승리</span>
+  </header>
+
+  <div class="court" id="court">
+    <canvas id="game" aria-label="말랑 배구 게임 화면"></canvas>
+    <div class="overlay" id="menu">
+      <h2>말랑 배구</h2>
+      <p>점프해서 공을 넘기고, 공중에서 스매시로 내리꽂으세요.</p>
+      <div class="choices">
+        <button class="btn" id="play1" type="button">혼자 하기</button>
+        <button class="btn alt" id="play2" type="button">둘이 하기</button>
+        <button class="btn online" id="playOnline" type="button">온라인 대결</button>
+      </div>
+      <p id="menuNote" class="note" hidden></p>
+    </div>
+    <div class="overlay" id="matching" hidden>
+      <h2 id="matchTitle">상대를 찾는 중…</h2>
+      <p id="matchInfo">다른 사람이 들어오면 바로 시작해요.</p>
+      <div class="choices">
+        <button class="btn alt" id="cancelMatch" type="button">취소</button>
+      </div>
+    </div>
+    <div class="overlay" id="over" hidden>
+      <h2 id="winner">말랑 승리!</h2>
+      <p id="final">15 : 9</p>
+      <div class="choices">
+        <button class="btn" id="again" type="button">한 판 더</button>
+        <button class="btn alt" id="toMenu" type="button">처음으로</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="touch-help"><b>말랑</b>을 손가락으로 잡으면 손가락을 그대로 따라와요. 공 쪽으로 빠르게 휘두르면 <b>스매시</b>, 아래로 휘두르면 내리꽂아요.</p>
+  <div class="bar">
+    <div class="keys">
+      <span><b>말랑</b> <kbd>A</kbd><kbd>D</kbd> 이동 <kbd>W</kbd> 점프 <kbd>S</kbd> 아래 <kbd>Space</kbd> 스매시</span>
+      <span><b>몽글</b> <kbd>←</kbd><kbd>→</kbd> 이동 <kbd>↑</kbd> 점프 <kbd>↓</kbd> 아래 <kbd>Enter</kbd> 스매시</span>
+    </div>
+    <div style="display:flex; gap:8px">
+      <button class="small-btn" id="pause" type="button">일시정지</button>
+      <button class="small-btn" id="sound" type="button">소리 켜짐</button>
+    </div>
+  </div>
+  <footer>스매시: 공중에서 공에 닿을 때 누르기. 방향키를 같이 누르면 위·아래로 꺾여요. 땅에서 이동하며 누르면 몸을 날려 받아요.</footer>
+</div>
+
+<script>
+(() => {
+  // ---- World constants (logical pixels; the canvas scales to fit) ----
+  const W = 432, H = 304;
+  const GROUND = 262;             // sand line where the ball scores
+  const NET_X = W / 2, NET_TOP = 172, NET_HALF = 4;
+  const PR = 27;                  // player radius
+  const STAND_Y = GROUND - PR + 2;
+  const BR = 16;                  // ball radius
+  const P_SPEED = 4.4, P_JUMP = -11.8, P_GRAV = 0.55;
+  const B_GRAV = 0.2, B_MAX = 10;
+  const WIN = 15;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const court = document.getElementById('court');
+
+  function resize() {
+    const r = court.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
+  }
+  new ResizeObserver(resize).observe(court);
+
+  // ---- Sound: tiny synthesized effects, started by a button press ----
+  let audio = null, soundOn = true;
+  function ensureAudio() {
+    if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { audio = null; } }
+    if (audio && audio.state === 'suspended') audio.resume();
+  }
+  function tone(freq, dur, type = 'sine', vol = 0.18, slide = 0) {
+    if (!audio || !soundOn) return;
+    const t = audio.currentTime;
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(audio.destination);
+    o.start(t); o.stop(t + dur);
+  }
+  const sfx = {
+    bump: () => tone(520, 0.08, 'triangle', 0.16, 120),
+    spike: () => { tone(180, 0.18, 'sawtooth', 0.12, -90); tone(880, 0.06, 'square', 0.06); },
+    jump: () => tone(300, 0.1, 'sine', 0.08, 220),
+    point: () => { tone(660, 0.12, 'triangle', 0.14); setTimeout(() => tone(990, 0.18, 'triangle', 0.14), 110); },
+    land: () => tone(120, 0.06, 'sine', 0.08),
+    win: () => [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, 0.22, 'triangle', 0.15), i * 130)),
+  };
+
+  // ---- Online play ----
+  // The host (first to join) runs the physics and streams snapshots; the guest
+  // sends only its controls and draws what the host sends.
+  const params = new URLSearchParams(location.search);
+  const SERVER = params.get('server') ||
+    (['localhost', '127.0.0.1'].includes(location.hostname) ? 'ws://127.0.0.1:8787' : 'wss://malang-volley.REPLACE_ME.workers.dev');
+  const net = { lobby: null, room: null, role: null, me: 0, remote: {}, fx: [], ready: false, sendTick: 0, overShown: false };
+
+  for (const name of Object.keys(sfx)) {
+    const play = sfx[name];
+    sfx[name] = () => { play(); if (state.online && net.role === 'host') net.fx.push({ s: name }); };
+  }
+
+  // ---- Input ----
+  const keys = { p1: {}, p2: {} };
+  const KEYMAP = {
+    KeyA: ['p1', 'left'], KeyD: ['p1', 'right'], KeyW: ['p1', 'up'], KeyS: ['p1', 'down'], Space: ['p1', 'hit'], KeyZ: ['p1', 'hit'],
+    ArrowLeft: ['p2', 'left'], ArrowRight: ['p2', 'right'], ArrowUp: ['p2', 'up'], ArrowDown: ['p2', 'down'], Enter: ['p2', 'hit'],
+  };
+  addEventListener('keydown', (e) => {
+    const m = KEYMAP[e.code];
+    if (!m) { if (e.code === 'KeyP' || e.code === 'Escape') togglePause(); return; }
+    if (state.mode !== 'menu') e.preventDefault();
+    // In single-player, arrow keys also drive 말랑 for convenience.
+    const [who, k] = state.single && m[0] === 'p2' ? ['p1', m[1]] : m;
+    if (!keys[who][k]) keys[who][k + 'Pressed'] = true;
+    keys[who][k] = true;
+  });
+  addEventListener('keyup', (e) => {
+    const m = KEYMAP[e.code];
+    if (!m) return;
+    const [who, k] = state.single && m[0] === 'p2' ? ['p1', m[1]] : m;
+    keys[who][k] = false;
+  });
+  addEventListener('blur', () => { keys.p1 = {}; keys.p2 = {}; });
+
+  // Touch: grab 말랑 with a finger and it sticks to the finger anywhere on its
+  // half of the court. A fast flick smashes in the flick's direction.
+  const touch = { id: null, x: 0, y: 0, pts: [], smash: 0, aim: 0, dive: 0, flash: 0 };
+  const FLICK = 0.75;            // logical px per ms that counts as a flick
+  function toWorld(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    if (state.mode !== 'play' || touch.id !== null) return;
+    const p = toWorld(e), me = state.p[net.me];
+    // Generous grab area: anywhere near my character, or anywhere on my half.
+    const otherHalf = me.side < 0 ? p.x > NET_X : p.x < NET_X;
+    if (Math.hypot(p.x - me.x, p.y - me.y) > 90 && otherHalf) return;
+    e.preventDefault();
+    ensureAudio();
+    canvas.setPointerCapture(e.pointerId);
+    Object.assign(touch, { id: e.pointerId, x: p.x, y: p.y, pts: [{ ...p, t: e.timeStamp }] });
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== touch.id) return;
+    e.preventDefault();
+    const p = toWorld(e);
+    touch.x = p.x; touch.y = p.y;
+    touch.pts.push({ ...p, t: e.timeStamp });
+    while (touch.pts.length > 2 && e.timeStamp - touch.pts[0].t > 70) touch.pts.shift();
+    const first = touch.pts[0], dt = Math.max(1, e.timeStamp - first.t);
+    const vx = (p.x - first.x) / dt, vy = (p.y - first.y) / dt;
+    if (Math.hypot(vx, vy) > FLICK && touch.smash === 0) {
+      touch.smash = 14;
+      touch.aim = vy > 0.35 ? 1 : vy < -0.35 ? -1 : 0;
+      touch.flash = 12;
+    }
+  });
+  const release = (e) => { if (e.pointerId === touch.id) { touch.id = null; touch.pts = []; } };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+
+  function touchControl() {
+    const c = { follow: true, tx: touch.x, ty: touch.y };
+    if (touch.smash > 0) {
+      touch.smash--;
+      c.hit = true;
+      if (touch.aim > 0) c.down = true; else if (touch.aim < 0) c.up = true;
+    }
+    return c;
+  }
+
+  // ---- Game state ----
+  function makePlayer(side) {
+    return {
+      side, x: side < 0 ? W * 0.22 : W * 0.78, y: STAND_Y, vx: 0, vy: 0,
+      ground: true, dive: 0, diveDir: 0, down: 0, squash: 0, hitFlash: 0, blink: Math.random() * 200,
+    };
+  }
+  const state = {
+    mode: 'menu', single: true, paused: false, online: false,
+    p: [makePlayer(-1), makePlayer(1)],
+    ball: { x: W * 0.22, y: 60, vx: 0, vy: 0, spin: 0, trail: [], power: 0 },
+    score: [0, 0], server: 0, freeze: 0, slow: 0, shake: 0, cool: 0,
+    particles: [], popups: [], clouds: [], t: 0,
+    ai: { targetX: W * 0.78, think: 0, reaction: 0 },
+  };
+  for (let i = 0; i < 5; i++) state.clouds.push({ x: Math.random() * W, y: 20 + Math.random() * 60, s: 0.6 + Math.random() * 0.8, v: 0.08 + Math.random() * 0.12 });
+
+  function resetRally(serverIdx) {
+    state.p = [makePlayer(-1), makePlayer(1)];
+    const sx = serverIdx === 0 ? W * 0.22 : W * 0.78;
+    Object.assign(state.ball, { x: sx, y: 50, vx: 0, vy: 0, spin: 0, trail: [], power: 0 });
+    state.server = serverIdx;
+    state.cool = 0;
+  }
+  function startGame(single) {
+    ensureAudio();
+    document.getElementById('menuNote').hidden = true;
+    state.single = single;
+    state.score = [0, 0];
+    state.mode = 'play';
+    state.paused = false;
+    state.particles = []; state.popups = [];
+    resetRally(Math.random() < 0.5 ? 0 : 1);
+    menu.hidden = true; over.hidden = true;
+    document.getElementById('pause').textContent = '일시정지';
+  }
+
+  // ---- Physics ----
+  function burst(x, y, color, n, speed) {
+    if (state.online && net.role === 'host') net.fx.push({ b: [Math.round(x), Math.round(y), color, n, speed] });
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = speed * (0.4 + Math.random() * 0.8);
+      state.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1, life: 1, color, r: 1.5 + Math.random() * 2.2 });
+    }
+  }
+
+  // Keyboard for my own character online: either key set works.
+  function localControl() {
+    if (touch.id !== null || touch.smash > 0) return touchControl();
+    const a = keys.p1, b = keys.p2, c = {};
+    for (const k of ['left', 'right', 'up', 'down', 'hit', 'upPressed', 'hitPressed']) c[k] = !!(a[k] || b[k]);
+    a.upPressed = b.upPressed = a.hitPressed = b.hitPressed = false;
+    return c;
+  }
+
+  function controlFor(i) {
+    if (state.online) {
+      if (i === net.me) return localControl();
+      const r = net.remote;
+      net.remote = { ...r, upPressed: false, hitPressed: false };
+      return r;
+    }
+    if (i === 1 && state.single) return aiControl();
+    if (i === 0 && touch.id !== null) return touchControl();
+    if (i === 0 && touch.smash > 0) return touchControl();
+    return keys[i === 0 ? 'p1' : 'p2'];
+  }
+
+  const TOUCH_TOP = 70; // highest a dragged player may be lifted
+
+  function updatePlayer(pl, c, i) {
+    const dir = (c.right ? 1 : 0) - (c.left ? 1 : 0);
+    const toward = -pl.side; // direction of the opponent's court
+    if (c.follow) {
+      // Held by a finger: snap to it, within this player's half.
+      const minX = pl.side < 0 ? PR : NET_X + NET_HALF + PR;
+      const maxX = pl.side < 0 ? NET_X - NET_HALF - PR : W - PR;
+      let nx = Math.max(minX, Math.min(maxX, c.tx));
+      let ny = Math.max(TOUCH_TOP, Math.min(STAND_Y, c.ty));
+      if (state.online) {
+        // Fair play online: a dragged character can't outrun a walking one by much.
+        nx = pl.x + Math.max(-6.5, Math.min(6.5, nx - pl.x));
+        ny = pl.y + Math.max(-9, Math.min(9, ny - pl.y));
+      }
+      pl.vx = nx - pl.x; pl.vy = ny - pl.y;
+      pl.x = nx; pl.y = ny;
+      const landed = ny >= STAND_Y;
+      if (landed && !pl.ground) pl.squash = 0.2;
+      pl.ground = landed;
+      pl.dive = 0;
+      pl.squash *= 0.82;
+      pl.hitFlash = Math.max(0, pl.hitFlash - 1);
+      pl.blink = (pl.blink + 1) % 240;
+      // A flick smashes wherever the player is, even near the sand.
+      pl.wantsHit = !!c.hit;
+      pl.aimUp = c.up; pl.aimDown = c.down; pl.toward = toward; pl.dir = Math.sign(pl.vx);
+      return;
+    }
+    if (pl.dive > 0) {
+      // Diving: slide along the sand, then lie flat for a moment.
+      pl.dive--;
+      pl.vx = pl.dive > 14 ? pl.diveDir * 7 : pl.vx * 0.8;
+      if (pl.dive === 0) pl.down = 0;
+    } else if (c.targetX !== undefined) {
+      // Dragged by a finger: chase it a little faster than walking speed.
+      pl.vx = Math.max(-6.5, Math.min(6.5, (c.targetX - pl.x) * 0.35));
+      if (pl.ground && c.up) { pl.vy = P_JUMP; pl.ground = false; pl.squash = -0.25; sfx.jump(); }
+      if (pl.ground && c.hitPressed && dir !== 0) { pl.dive = 26; pl.diveDir = dir; sfx.jump(); }
+    } else if (pl.ground) {
+      pl.vx = dir * P_SPEED;
+      if (c.up) { pl.vy = P_JUMP; pl.ground = false; pl.squash = -0.25; sfx.jump(); }
+      if (c.hitPressed && dir !== 0) { pl.dive = 26; pl.diveDir = dir; sfx.jump(); }
+    } else {
+      pl.vx = dir * P_SPEED;
+    }
+    pl.vy += P_GRAV;
+    pl.x += pl.vx; pl.y += pl.vy;
+    if (pl.y >= STAND_Y) {
+      if (!pl.ground) { pl.squash = 0.28; burst(pl.x, GROUND - 2, '#E8D4A6', 5, 1.6); sfx.land(); }
+      pl.y = STAND_Y; pl.vy = 0; pl.ground = true;
+    }
+    // Each player keeps to their own half.
+    const minX = pl.side < 0 ? PR : NET_X + NET_HALF + PR;
+    const maxX = pl.side < 0 ? NET_X - NET_HALF - PR : W - PR;
+    pl.x = Math.max(minX, Math.min(maxX, pl.x));
+    pl.squash *= 0.82;
+    pl.hitFlash = Math.max(0, pl.hitFlash - 1);
+    pl.blink = (pl.blink + 1) % 240;
+    pl.wantsHit = !pl.ground && c.hit;
+    pl.aimUp = c.up; pl.aimDown = c.down; pl.toward = toward; pl.dir = dir;
+    c.upPressed = false; c.hitPressed = false;
+  }
+
+  function hitBall(pl) {
+    const b = state.ball;
+    const dx = b.x - pl.x, dy = b.y - (pl.y - 4);
+    const dist = Math.hypot(dx, dy);
+    if (dist > PR + BR || state.cool > 0) return;
+    state.cool = 8;
+    if (pl.wantsHit) {
+      // Smash: fast and flat toward the opponent, bent by up/down.
+      const vy = pl.aimDown ? 6.5 : pl.aimUp ? -6.5 : 2;
+      const vx = pl.toward * (pl.aimUp || pl.aimDown ? 7.5 : 9.5);
+      b.vx = vx; b.vy = vy; b.power = 26;
+      pl.hitFlash = 10;
+      state.shake = reduceMotion ? 0 : 7;
+      burst(b.x, b.y, '#FFF2C2', 14, 3.6);
+      sfx.spike();
+    } else {
+      // Bump: the ball bounces off the round body, nudged toward the far side.
+      const nx = dx / (dist || 1);
+      b.vx = Math.max(-5, Math.min(5, nx * 5 + pl.vx * 0.3 + pl.toward * 0.9));
+      b.vy = -Math.max(6.2, Math.abs(b.vy) * 0.4 + 5) + Math.min(0, pl.vy) * 0.3;
+      if (pl.dive > 0) b.vy = -7.8;
+      b.power = 0;
+      burst(b.x, b.y + BR * 0.6, '#FFFFFF', 5, 1.8);
+      sfx.bump();
+    }
+    pl.squash = 0.2;
+    // Push the ball out of the body so it can't stick.
+    const push = PR + BR + 1;
+    b.x = pl.x + (dx / (dist || 1)) * push;
+    b.y = pl.y - 4 + (dy / (dist || 1)) * push;
+  }
+
+  function updateBall(step) {
+    const b = state.ball;
+    b.vy += B_GRAV * step;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > B_MAX) { b.vx *= B_MAX / sp; b.vy *= B_MAX / sp; }
+    b.x += b.vx * step; b.y += b.vy * step;
+    b.spin += b.vx * 0.06 * step;
+    b.power = Math.max(0, b.power - step);
+    if (b.power > 0 || sp > 8.5) { b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 10) b.trail.shift(); }
+    else if (b.trail.length) b.trail.shift();
+
+    // Walls and ceiling
+    if (b.x < BR) { b.x = BR; b.vx = Math.abs(b.vx) * 0.9; }
+    if (b.x > W - BR) { b.x = W - BR; b.vx = -Math.abs(b.vx) * 0.9; }
+    if (b.y < BR) { b.y = BR; b.vy = Math.abs(b.vy) * 0.6; }
+
+    // Net post with a rounded cap
+    if (b.y + BR > NET_TOP && Math.abs(b.x - NET_X) < NET_HALF + BR) {
+      if (b.y < NET_TOP + 6 && b.vy > 0) {
+        b.y = NET_TOP - BR; b.vy = -Math.abs(b.vy) * 0.7; b.vx += (b.x < NET_X ? -1 : 1) * 1.2;
+      } else {
+        b.x = b.x < NET_X ? NET_X - NET_HALF - BR : NET_X + NET_HALF + BR;
+        b.vx = -b.vx * 0.75;
+      }
+      sfx.land();
+    }
+
+    // Ground: point to the other side
+    if (b.y + BR >= GROUND) {
+      b.y = GROUND - BR;
+      const scorer = b.x < NET_X ? 1 : 0;
+      scorePoint(scorer);
+    }
+  }
+
+  function scorePoint(scorer) {
+    const b = state.ball;
+    state.score[scorer]++;
+    state.freeze = 70;
+    state.slow = reduceMotion ? 0 : 28;
+    state.shake = reduceMotion ? 0 : 5;
+    burst(b.x, GROUND - 4, '#E8D4A6', 22, 3.2);
+    const popup = { x: b.x, y: GROUND - 40, text: scorer === 0 ? '말랑 +1' : '몽글 +1', color: scorer === 0 ? '#48C3A6' : '#FF9C7A', life: 1 };
+    state.popups.push(popup);
+    if (state.online && net.role === 'host') net.fx.push({ p: popup });
+    b.vy = -Math.abs(b.vy) * 0.35; b.vx *= 0.5;
+    sfx.point();
+    state.nextServer = scorer;
+    if (state.score[scorer] >= WIN) {
+      state.mode = 'over';
+      setTimeout(showOver, 1200);
+      sfx.win();
+    }
+  }
+
+  // ---- Computer player (몽글) ----
+  function predictLanding() {
+    const b = state.ball;
+    let x = b.x, y = b.y, vx = b.vx, vy = b.vy;
+    for (let i = 0; i < 160; i++) {
+      vy += B_GRAV; x += vx; y += vy;
+      if (x < BR) { x = BR; vx = Math.abs(vx); }
+      if (x > W - BR) { x = W - BR; vx = -Math.abs(vx); }
+      if (y > STAND_Y - PR - 6 && vy > 0) return x;
+    }
+    return x;
+  }
+  function aiControl() {
+    const me = state.p[1], b = state.ball, ai = state.ai;
+    const c = {};
+    if (--ai.think <= 0) {
+      ai.think = 5 + Math.floor(Math.random() * 4);
+      const land = predictLanding();
+      // Stand a little behind the ball so the bump sends it over the net.
+      ai.targetX = land > NET_X ? land + 9 + Math.random() * 6 : W * 0.74;
+    }
+    const dx = ai.targetX - me.x;
+    if (Math.abs(dx) > 4) c[dx > 0 ? 'right' : 'left'] = true;
+    const near = Math.abs(b.x - me.x) < 46 && b.x > NET_X;
+    if (me.ground && near && b.y < me.y - 50 && b.y > me.y - 150 && b.vy > -2 && Math.random() < 0.55) {
+      c.up = true; c.upPressed = true;
+    }
+    if (!me.ground && Math.hypot(b.x - me.x, b.y - me.y) < 60 && b.x > me.x - 30 && Math.random() < 0.7) {
+      c.hit = true;
+      if (Math.random() < 0.55) c.down = true; else if (Math.random() < 0.3) c.up = true;
+    }
+    if (me.ground && b.x > NET_X && b.vy > 4 && Math.abs(predictLanding() - me.x) > 70 && Math.abs(predictLanding() - me.x) < 120 && b.y > 150) {
+      c.hitPressed = true; c[predictLanding() > me.x ? 'right' : 'left'] = true;
+    }
+    return c;
+  }
+
+  // ---- Main step ----
+  function step() {
+    state.t++;
+    for (const cl of state.clouds) { cl.x += cl.v; if (cl.x > W + 60) cl.x = -60; }
+    if (state.mode === 'menu') { idleDemo(); return; }
+    if (state.online && net.role === 'guest') { guestStep(); return; }
+    if (state.paused) return;
+
+    const slowFactor = state.slow > 0 ? 0.35 : 1;
+    if (state.slow > 0) state.slow--;
+
+    if (state.freeze > 0) {
+      state.freeze--;
+      updateBallFree(slowFactor);
+      if (state.freeze === 0 && state.mode === 'play') resetRally(state.nextServer);
+    } else if (state.mode === 'play') {
+      updatePlayer(state.p[0], controlFor(0), 0);
+      updatePlayer(state.p[1], controlFor(1), 1);
+      if (state.cool > 0) state.cool--;
+      hitBall(state.p[0]); hitBall(state.p[1]);
+      updateBall(slowFactor);
+    } else {
+      updateBallFree(slowFactor);
+    }
+    tickEffects();
+    if (state.online && net.role === 'host' && ++net.sendTick % 2 === 0) sendSnapshot();
+  }
+
+  const r1 = (v) => Math.round(v * 10) / 10;
+  function sendSnapshot() {
+    send(net.room, {
+      t: 's',
+      p: state.p.map((pl) => [r1(pl.x), r1(pl.y), r1(pl.vx), r1(pl.vy), pl.ground ? 1 : 0, pl.dive, pl.diveDir, r1(pl.squash), pl.hitFlash]),
+      b: [r1(state.ball.x), r1(state.ball.y), r1(state.ball.vx), r1(state.ball.vy), r1(state.ball.spin), state.ball.power],
+      sc: state.score, fz: state.freeze, sl: state.slow, md: state.mode,
+      fx: net.fx.splice(0),
+    });
+  }
+  function applySnapshot(m) {
+    m.p.forEach((a, i) => {
+      const pl = state.p[i];
+      [pl.x, pl.y, pl.vx, pl.vy] = a; pl.ground = !!a[4]; pl.dive = a[5]; pl.diveDir = a[6]; pl.squash = a[7]; pl.hitFlash = a[8];
+    });
+    const b = state.ball;
+    [b.x, b.y, b.vx, b.vy, b.spin, b.power] = m.b;
+    state.score = m.sc; state.freeze = m.fz; state.slow = m.sl;
+    for (const f of m.fx || []) {
+      if (f.s && sfx[f.s]) sfx[f.s]();
+      if (f.b) burst(...f.b);
+      if (f.p) state.popups.push(f.p);
+      if (f.s === 'spike') state.shake = reduceMotion ? 0 : 7;
+    }
+    if (m.md === 'over' && !net.overShown) { net.overShown = true; state.mode = 'over'; setTimeout(showOver, 1200); }
+  }
+  // Between snapshots the guest keeps things moving along their last velocity.
+  function guestStep() {
+    // Send controls 30 times a second; one-shot presses are kept until sent.
+    const c = localControl();
+    net.pending = { upPressed: !!(net.pending?.upPressed || c.upPressed), hitPressed: !!(net.pending?.hitPressed || c.hitPressed) };
+    if (++net.sendTick % 2 === 0) {
+      send(net.room, { t: 'i', c: { ...c, ...net.pending } });
+      net.pending = null;
+    }
+    const k = state.slow > 0 ? 0.35 : 1;
+    const b = state.ball;
+    b.vy += B_GRAV * k; b.x += b.vx * k; b.y += b.vy * k; b.spin += b.vx * 0.06 * k;
+    if (b.y + BR > GROUND) b.y = GROUND - BR;
+    if (b.power > 0 || Math.hypot(b.vx, b.vy) > 8.5) { b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 10) b.trail.shift(); }
+    else if (b.trail.length) b.trail.shift();
+    for (const pl of state.p) {
+      pl.x += pl.vx * 0.5; pl.y = Math.min(STAND_Y, pl.y + pl.vy * 0.5);
+      pl.blink = (pl.blink + 1) % 240;
+    }
+    tickEffects();
+  }
+
+  function send(ws, msg) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  }
+  function closeNet() {
+    for (const ws of [net.lobby, net.room]) { if (ws) { ws.onclose = null; try { ws.close(); } catch {} } }
+    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remote: {}, fx: [], ready: false, overShown: false });
+  }
+  function endOnline(message) {
+    closeNet();
+    state.online = false;
+    state.mode = 'menu';
+    matching.hidden = true; over.hidden = true; menu.hidden = false;
+    const note = document.getElementById('menuNote');
+    note.textContent = message || '';
+    note.hidden = !message;
+    resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
+  }
+  function startOnline() {
+    ensureAudio();
+    closeNet();
+    menu.hidden = true; over.hidden = true; matching.hidden = false;
+    document.getElementById('matchTitle').textContent = '상대를 찾는 중…';
+    document.getElementById('matchInfo').textContent = '다른 사람이 들어오면 바로 시작해요.';
+    let lobby;
+    try { lobby = new WebSocket(`${SERVER}/match`); } catch { endOnline('서버에 연결할 수 없어요.'); return; }
+    net.lobby = lobby;
+    lobby.onerror = () => endOnline('서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.');
+    lobby.onclose = () => { if (!net.room) endOnline('연결이 끊겼어요.'); };
+    lobby.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type !== 'matched') return;
+      lobby.onclose = null;
+      net.role = m.role; net.me = m.role === 'host' ? 0 : 1;
+      document.getElementById('matchTitle').textContent = '상대를 찾았어요!';
+      document.getElementById('matchInfo').textContent = `나는 ${net.me === 0 ? '말랑(왼쪽)' : '몽글(오른쪽)'}이에요.`;
+      const room = new WebSocket(`${SERVER}/room/${m.room}?role=${m.role}`);
+      net.room = room;
+      room.onclose = () => { if (state.online || net.room === room) endOnline('연결이 끊겼어요.'); };
+      room.onmessage = (ev) => {
+        const r = JSON.parse(ev.data);
+        if (r.type === 'ready' && !net.ready) beginOnline();
+        else if (r.type === 'left') endOnline('상대가 나갔어요.');
+        else if (r.t === 'i' && net.role === 'host') {
+          // Keep one-shot presses until the physics step consumes them.
+          const prev = net.remote;
+          net.remote = { ...r.c, upPressed: !!(prev.upPressed || r.c.upPressed), hitPressed: !!(prev.hitPressed || r.c.hitPressed) };
+        } else if (r.t === 's' && net.role === 'guest') applySnapshot(r);
+      };
+    };
+  }
+  function beginOnline() {
+    net.ready = true;
+    setTimeout(() => {
+      matching.hidden = true;
+      startGame(false);
+      state.online = true;
+      if (net.role === 'host') resetRally(Math.random() < 0.5 ? 0 : 1);
+    }, 700);
+  }
+  // After a point the ball keeps rolling on the sand without scoring again.
+  function updateBallFree(step) {
+    const b = state.ball;
+    b.vy += B_GRAV * step; b.x += b.vx * step; b.y += b.vy * step; b.vx *= 0.985; b.spin += b.vx * 0.06;
+    if (b.y + BR > GROUND) { b.y = GROUND - BR; b.vy = -Math.abs(b.vy) * 0.35; }
+    if (b.x < BR || b.x > W - BR) b.vx = -b.vx;
+    if (b.trail.length) b.trail.shift();
+  }
+  function tickEffects() {
+    state.shake *= 0.85;
+    for (const p of state.particles) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= 0.03; }
+    state.particles = state.particles.filter((p) => p.life > 0);
+    for (const p of state.popups) { p.y -= 0.6; p.life -= 0.015; }
+    state.popups = state.popups.filter((p) => p.life > 0);
+  }
+  // Behind the menu, the two characters keep a gentle rally going.
+  function idleDemo() {
+    const b = state.ball;
+    for (const pl of state.p) {
+      pl.blink = (pl.blink + 1) % 240;
+      const target = (b.x < NET_X) === (pl.side < 0) ? b.x - pl.side * 10 : (pl.side < 0 ? W * 0.22 : W * 0.78);
+      pl.x += Math.max(-3, Math.min(3, target - pl.x));
+      pl.vy += P_GRAV; pl.y += pl.vy;
+      if (pl.y >= STAND_Y) { pl.y = STAND_Y; pl.vy = 0; pl.ground = true; }
+      pl.squash *= 0.85;
+      const d = Math.hypot(b.x - pl.x, b.y - pl.y);
+      if (d < PR + BR + 2 && b.vy > 0) { b.vy = -10.5; b.vx = -pl.side * (3.6 + Math.random()); pl.squash = 0.2; }
+    }
+    b.vy += B_GRAV * 0.8; b.x += b.vx; b.y += b.vy; b.spin += b.vx * 0.05;
+    if (b.x < BR || b.x > W - BR) b.vx = -b.vx;
+    if (b.y + BR > GROUND) { b.y = GROUND - BR; b.vy = -9; b.vx = (b.x < NET_X ? 1 : -1) * 3.5; }
+    tickEffects();
+  }
+
+  // ---- Drawing ----
+  function drawScene() {
+    const t = state.t;
+    // Sky
+    const sky = ctx.createLinearGradient(0, 0, 0, 200);
+    sky.addColorStop(0, '#6FC3F0'); sky.addColorStop(1, '#CFEFF9');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    // Sun
+    ctx.fillStyle = 'rgba(255, 236, 160, 0.45)';
+    ctx.beginPath(); ctx.arc(360, 46, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#FFE38A';
+    ctx.beginPath(); ctx.arc(360, 46, 20, 0, Math.PI * 2); ctx.fill();
+    // Clouds
+    for (const c of state.clouds) {
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 22 * c.s, 9 * c.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + 14 * c.s, c.y - 5 * c.s, 14 * c.s, 9 * c.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x - 12 * c.s, c.y - 3 * c.s, 11 * c.s, 7 * c.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Sea with drifting wave lines
+    const seaTop = 188;
+    const sea = ctx.createLinearGradient(0, seaTop, 0, GROUND);
+    sea.addColorStop(0, '#2E9CC8'); sea.addColorStop(1, '#5FC4DB');
+    ctx.fillStyle = sea; ctx.fillRect(0, seaTop, W, GROUND - seaTop);
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.2;
+    for (let row = 0; row < 3; row++) {
+      const y = seaTop + 10 + row * 13;
+      ctx.beginPath();
+      for (let x = -20; x <= W + 20; x += 6) {
+        const yy = y + Math.sin((x + t * (0.6 + row * 0.25)) * 0.05) * 1.6;
+        x === -20 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+    // Sand
+    const sand = ctx.createLinearGradient(0, GROUND - 14, 0, H);
+    sand.addColorStop(0, '#F6DFA8'); sand.addColorStop(1, '#E9C67E');
+    ctx.fillStyle = sand;
+    ctx.beginPath(); ctx.moveTo(0, GROUND - 8);
+    for (let x = 0; x <= W; x += 12) ctx.lineTo(x, GROUND - 8 + Math.sin(x * 0.09 + t * 0.03) * 1.5);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(180, 140, 70, 0.25)';
+    for (let i = 0; i < 40; i++) { const x = (i * 97) % W, y = GROUND + 4 + ((i * 53) % 34); ctx.fillRect(x, y, 2, 1.4); }
+  }
+
+  function drawNet() {
+    ctx.fillStyle = '#6E5236';
+    ctx.fillRect(NET_X - NET_HALF, NET_TOP, NET_HALF * 2, GROUND - NET_TOP);
+    ctx.fillStyle = '#8E6C47';
+    ctx.fillRect(NET_X - NET_HALF + 1, NET_TOP, 2, GROUND - NET_TOP);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath(); ctx.arc(NET_X, NET_TOP, NET_HALF + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#D9D9D9'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  function drawShadow(x, y, r) {
+    const h = GROUND - y;
+    const s = Math.max(0.35, 1 - h / 220);
+    ctx.fillStyle = `rgba(120, 85, 30, ${0.28 * s})`;
+    ctx.beginPath(); ctx.ellipse(x, GROUND + 2, r * s, r * 0.28 * s, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // 말랑 (mint, sprout) and 몽글 (peach, curl): round jelly bodies.
+  function drawPlayer(pl, idx) {
+    const b = state.ball;
+    const body = idx === 0 ? '#48C3A6' : '#FF9C7A';
+    const dark = idx === 0 ? '#2B8A73' : '#D46A4A';
+    const belly = idx === 0 ? '#C9F1E4' : '#FFE0D2';
+    drawShadow(pl.x, pl.y, PR);
+    ctx.save();
+    ctx.translate(pl.x, pl.y + PR);
+    const lying = pl.dive > 0 && pl.dive <= 14;
+    if (pl.dive > 14 || lying) ctx.rotate(pl.diveDir * (lying ? 1.2 : 0.7));
+    const sq = pl.squash;
+    ctx.scale(1 + sq * 0.5, 1 - sq * 0.5);
+    ctx.translate(0, -PR);
+    // Feet
+    ctx.fillStyle = dark;
+    const step = pl.ground && Math.abs(pl.vx) > 0.5 ? Math.sin(state.t * 0.5) * 3 : 0;
+    ctx.beginPath(); ctx.ellipse(-11, PR - 3 + step, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(11, PR - 3 - step, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+    // Body
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.ellipse(0, 0, PR, PR * 0.96, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = belly;
+    ctx.beginPath(); ctx.ellipse(0, 10, PR * 0.6, PR * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    // Head decoration
+    ctx.strokeStyle = dark; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    if (idx === 0) {
+      ctx.beginPath(); ctx.moveTo(0, -PR + 1); ctx.lineTo(0, -PR - 8); ctx.stroke();
+      ctx.fillStyle = '#7ED957';
+      ctx.beginPath(); ctx.ellipse(-6, -PR - 9, 7, 3.6, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(6, -PR - 10, 7, 3.6, 0.5, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.arc(3, -PR - 4, 6, Math.PI * 0.9, Math.PI * 2.4); ctx.stroke();
+    }
+    // Eyes look at the ball
+    const lx = Math.max(-2.5, Math.min(2.5, (b.x - pl.x) * 0.05));
+    const ly = Math.max(-2.5, Math.min(2.5, (b.y - pl.y) * 0.05));
+    const blink = pl.blink > 232;
+    for (const ex of [-9, 9]) {
+      if (blink) { ctx.strokeStyle = '#1E2A33'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ex - 4, -6); ctx.lineTo(ex + 4, -6); ctx.stroke(); continue; }
+      ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.ellipse(ex, -6, 6, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1E2A33'; ctx.beginPath(); ctx.arc(ex + lx, -5 + ly, 3.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(ex + lx + 1.2, -6.4 + ly, 1.1, 0, Math.PI * 2); ctx.fill();
+    }
+    // Mouth: open when smashing
+    ctx.strokeStyle = '#1E2A33'; ctx.lineWidth = 1.8;
+    if (pl.hitFlash > 0) { ctx.fillStyle = '#7A2E2E'; ctx.beginPath(); ctx.ellipse(0, 6, 4, 4.5, 0, 0, Math.PI * 2); ctx.fill(); }
+    else { ctx.beginPath(); ctx.arc(0, 3, 4, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function drawBall() {
+    const b = state.ball;
+    // Motion trail on hard hits
+    b.trail.forEach((p, i) => {
+      const a = (i + 1) / b.trail.length;
+      ctx.fillStyle = `rgba(255, 236, 170, ${a * 0.35})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, BR * (0.5 + a * 0.45), 0, Math.PI * 2); ctx.fill();
+    });
+    drawShadow(b.x, b.y, BR * 0.9);
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.spin);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath(); ctx.arc(0, 0, BR, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.beginPath(); ctx.arc(0, 0, BR, 0, Math.PI * 2); ctx.clip();
+    const colors = ['#FFC93C', '#2F9BD6', '#FF7A59'];
+    colors.forEach((c, i) => {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(i * 2.1) * BR * 0.9, Math.sin(i * 2.1) * BR * 0.9, BR * 0.95, BR * 0.42, i * 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 0, BR, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath(); ctx.arc(b.x - 5, b.y - 6, 4, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawHud() {
+    ctx.textAlign = 'center';
+    ctx.font = '34px Jua, sans-serif';
+    ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(14, 42, 68, 0.55)';
+    [[state.score[0], W * 0.25, '#FFFFFF'], [state.score[1], W * 0.75, '#FFFFFF']].forEach(([s, x, c]) => {
+      ctx.strokeText(String(s), x, 44); ctx.fillStyle = c; ctx.fillText(String(s), x, 44);
+    });
+    ctx.font = '13px Jua, sans-serif';
+    ctx.fillStyle = '#0E2A44';
+    const names = state.online
+      ? [net.me === 0 ? '말랑 (나)' : '말랑 (상대)', net.me === 1 ? '몽글 (나)' : '몽글 (상대)']
+      : ['말랑', state.single ? '몽글 (컴퓨터)' : '몽글'];
+    ctx.fillText(names[0], W * 0.25, 62); ctx.fillText(names[1], W * 0.75, 62);
+    for (const p of state.popups) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.font = '18px Jua, sans-serif';
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.strokeText(p.text, p.x, p.y);
+      ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y);
+      ctx.globalAlpha = 1;
+    }
+    if (state.paused) {
+      ctx.fillStyle = 'rgba(14, 42, 68, 0.45)'; ctx.fillRect(0, 0, W, H);
+      ctx.font = '30px Jua, sans-serif'; ctx.fillStyle = '#FFFFFF'; ctx.fillText('일시정지', W / 2, H / 2);
+    }
+  }
+
+  function draw() {
+    ctx.save();
+    if (state.shake > 0.5) ctx.translate((Math.random() - 0.5) * state.shake, (Math.random() - 0.5) * state.shake);
+    drawScene();
+    drawNet();
+    drawPlayer(state.p[0], 0);
+    drawPlayer(state.p[1], 1);
+    drawBall();
+    for (const p of state.particles) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (touch.id !== null) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(touch.x, touch.y, 14, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (touch.flash > 0) {
+      const me = state.p[net.me];
+      ctx.strokeStyle = `rgba(255, 211, 107, ${touch.flash / 12})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(me.x, me.y, PR + 10 + (12 - touch.flash), 0, Math.PI * 2); ctx.stroke();
+      touch.flash--;
+    }
+    if (state.mode !== 'menu') drawHud();
+    ctx.restore();
+  }
+
+  // Fixed 60 Hz simulation, drawn every display frame.
+  let last = performance.now(), acc = 0;
+  function frame(now) {
+    acc += Math.min(100, now - last); last = now;
+    while (acc >= 1000 / 60) { step(); acc -= 1000 / 60; }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // ---- UI wiring ----
+  const menu = document.getElementById('menu');
+  const over = document.getElementById('over');
+  const matching = document.getElementById('matching');
+  function showOver() {
+    const [a, b] = state.score;
+    if (state.online) {
+      const iWon = (a > b) === (net.me === 0);
+      document.getElementById('winner').textContent = iWon ? '내가 이겼어요!' : '아쉽게 졌어요';
+      document.getElementById('again').textContent = '새 상대 찾기';
+    } else {
+      document.getElementById('winner').textContent = a > b ? '말랑 승리!' : (state.single ? '몽글(컴퓨터) 승리!' : '몽글 승리!');
+      document.getElementById('again').textContent = '한 판 더';
+    }
+    document.getElementById('final').textContent = `${a} : ${b}`;
+    over.hidden = false;
+  }
+  function togglePause() {
+    if (state.mode !== 'play' || state.online) return;
+    state.paused = !state.paused;
+    document.getElementById('pause').textContent = state.paused ? '계속하기' : '일시정지';
+  }
+  document.getElementById('play1').addEventListener('click', () => startGame(true));
+  document.getElementById('play2').addEventListener('click', () => startGame(false));
+  document.getElementById('again').addEventListener('click', () => (state.online ? startOnline() : startGame(state.single)));
+  document.getElementById('toMenu').addEventListener('click', () => {
+    if (state.online) { endOnline(); return; }
+    state.mode = 'menu'; over.hidden = true; menu.hidden = false; resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
+  });
+  document.getElementById('playOnline').addEventListener('click', startOnline);
+  document.getElementById('cancelMatch').addEventListener('click', () => endOnline());
+  document.getElementById('pause').addEventListener('click', togglePause);
+  document.getElementById('sound').addEventListener('click', (e) => {
+    soundOn = !soundOn; ensureAudio();
+    e.currentTarget.textContent = soundOn ? '소리 켜짐' : '소리 꺼짐';
+  });
+
+  resize();
+  resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
+  requestAnimationFrame(frame);
+})();
+</script>
