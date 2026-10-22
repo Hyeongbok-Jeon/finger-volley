@@ -1,5 +1,5 @@
 /*
- * 말랑 배구 matchmaking + relay server (Cloudflare Workers + Durable Objects).
+ * 손가락 배구 matchmaking + relay server (Cloudflare Workers + Durable Objects).
  *
  *   GET /match  (WebSocket)  join the queue; when a second player arrives both
  *                             receive {type:'matched', room, role}
