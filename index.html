@@ -161,7 +161,6 @@
       <p>점프해서 공을 넘기고, 공중에서 스매시로 내리꽂으세요.</p>
       <div class="choices">
         <button class="btn" id="play1" type="button">혼자 하기</button>
-        <button class="btn alt" id="play2" type="button">둘이 하기</button>
         <button class="btn online" id="playOnline" type="button">온라인 대결</button>
       </div>
       <p id="menuNote" class="note" hidden></p>
@@ -186,8 +185,9 @@
   <p class="touch-help"><b>말랑</b>을 손가락으로 잡으면 손가락을 그대로 따라와요. 공 쪽으로 빠르게 휘두르면 <b>스매시</b>, 아래로 휘두르면 내리꽂아요.</p>
   <div class="bar">
     <div class="keys">
-      <span><b>말랑</b> <kbd>A</kbd><kbd>D</kbd> 이동 <kbd>W</kbd> 점프 <kbd>S</kbd> 아래 <kbd>Space</kbd> 스매시</span>
-      <span><b>몽글</b> <kbd>←</kbd><kbd>→</kbd> 이동 <kbd>↑</kbd> 점프 <kbd>↓</kbd> 아래 <kbd>Enter</kbd> 스매시</span>
+      <span><kbd>A</kbd><kbd>D</kbd> 또는 <kbd>←</kbd><kbd>→</kbd> 이동</span>
+      <span><kbd>W</kbd> 또는 <kbd>↑</kbd> 점프</span>
+      <span><kbd>Space</kbd> 또는 <kbd>Enter</kbd> 스매시 (<kbd>S</kbd>/<kbd>↓</kbd>와 같이 누르면 내리꽂기)</span>
     </div>
     <div style="display:flex; gap:8px">
       <button class="small-btn" id="pause" type="button">일시정지</button>
@@ -1001,7 +1001,6 @@
     document.getElementById('pause').textContent = state.paused ? '계속하기' : '일시정지';
   }
   document.getElementById('play1').addEventListener('click', () => startGame(true));
-  document.getElementById('play2').addEventListener('click', () => startGame(false));
   document.getElementById('again').addEventListener('click', () => (state.online ? startOnline() : startGame(state.single)));
   document.getElementById('toMenu').addEventListener('click', () => {
     if (state.online) { endOnline(); return; }
