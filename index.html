@@ -180,7 +180,7 @@
 <div class="wrap">
   <header>
     <h1><span class="m">손가락</span> <span class="p">배구</span></h1>
-    <span class="tag">15점 먼저 내면 승리</span>
+    <span class="tag">5점 먼저 내면 승리</span>
   </header>
 
   <div class="court" id="court">
@@ -228,7 +228,7 @@
     </div>
     <div class="overlay" id="over" hidden>
       <h2 id="winner">말랑 승리!</h2>
-      <p id="final">15 : 9</p>
+      <p id="final">5 : 3</p>
       <p id="rankDelta" class="note" hidden></p>
       <div class="choices">
         <button class="btn" id="again" type="button">한 판 더</button>
@@ -263,7 +263,7 @@
   const BR = 16;                  // ball radius
   const P_SPEED = 4.4, P_JUMP = -11.8, P_GRAV = 0.55;
   const B_GRAV = 0.2, B_MAX = 10;
-  const WIN = 15;
+  const WIN = 5;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const canvas = document.getElementById('game');

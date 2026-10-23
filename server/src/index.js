@@ -182,7 +182,7 @@ export class Room {
 
 const START_RATING = 1000;
 const K = 32;
-const MIN_GAME_MS = 45_000;   // shorter than any real 15-point game: no change
+const MIN_GAME_MS = 20_000;   // shorter than any real 5-point game: no change
 const SOLO_REPORT_MS = 90_000; // wait this long for the other side's report
 const STALE_MS = 3_600_000;
 const PID_RE = /^[a-f0-9]{32}$/;
