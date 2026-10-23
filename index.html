@@ -358,7 +358,7 @@
     ball: { x: W * 0.22, y: 60, vx: 0, vy: 0, spin: 0, trail: [], power: 0 },
     score: [0, 0], server: 0, freeze: 0, slow: 0, shake: 0, cool: 0,
     particles: [], popups: [], clouds: [], t: 0,
-    ai: { targetX: W * 0.78, think: 0, reaction: 0 },
+    ai: { plan: null, sig: '', think: 0, reaction: 0, pending: false },
   };
   for (let i = 0; i < 5; i++) state.clouds.push({ x: Math.random() * W, y: 20 + Math.random() * 60, s: 0.6 + Math.random() * 0.8, v: 0.08 + Math.random() * 0.12 });
 
@@ -407,6 +407,7 @@
   function controlFor(i) {
     if (state.online) return localControl(); // only ever asked for my own character
     if (i === 1 && state.single) return aiControl();
+    if (i === 0 && params.has('bot')) return humanBot();
     if (i === 0 && touch.id !== null) return touchControl();
     if (i === 0 && touch.smash > 0) return touchControl();
     return keys[i === 0 ? 'p1' : 'p2'];
@@ -591,29 +592,141 @@
     }
     return x;
   }
+  // The computer plans with the real ball physics: it looks ahead to where it
+  // can meet the ball, tries out each bump or smash it could make, and picks
+  // the one that lands farthest from you. A short reaction delay and a little
+  // aiming error keep it beatable.
+  const AI_REACT = 6, AI_ERR = 5, AI_MISREAD = 0.1;
+  function simBall(b, n) {
+    const o = { x: b.x, y: b.y, vx: b.vx, vy: b.vy }, path = [];
+    for (let i = 0; i < n; i++) {
+      moveBall(o, 1);
+      path.push({ x: o.x, y: o.y, vy: o.vy });
+      if (o.y + BR >= GROUND) break;
+    }
+    return path;
+  }
+  // How hard a shot is to return. You can lift 말랑 anywhere on your half,
+  // so it is modelled as reacting after ~12 frames and then closing in at
+  // ~8px a frame; the score is the closest you'd get to the ball anywhere
+  // along its flight on your side (bigger = harder). NO_SHOT if it doesn't
+  // make it over.
+  const NO_SHOT = -1e9;
+  function shotScore(x, y, vx, vy, opp) {
+    const o = { x, y, vx, vy };
+    let worst = Infinity;
+    for (let t = 1; t < 220; t++) {
+      if (moveBall(o, 1) && o.x > NET_X) return NO_SHOT; // stuffed by the net
+      if (o.x < NET_X - BR && o.y > TOUCH_TOP - PR) {
+        const gap = Math.hypot(o.x - opp.x, o.y - opp.y) - (PR + BR) - Math.max(0, t - 12) * 8;
+        if (gap < worst) worst = gap;
+      }
+      if (o.y + BR >= GROUND) return o.x > NET_X - BR ? NO_SHOT : worst;
+    }
+    return NO_SHOT;
+  }
+  const jumpY = (m) => STAND_Y + m * P_JUMP + (P_GRAV * m * (m + 1)) / 2;
+  // Best shot the computer can make on a ball in flight, standing at meX now.
+  // With `canSet`, it may also bump the ball up on its own side to set up a
+  // smash near the net (judged by planning that next shot too).
+  function bestShot(b, meX, onGround, opp, canSet) {
+    const path = simBall(b, 200);
+    let best = null, sets = canSet ? 8 : 0; // nested look-aheads are costly
+    const reach = (px, n) => Math.abs(px - meX) <= P_SPEED * n + 2;
+    const minX = NET_X + NET_HALF + PR, maxX = W - PR;
+    for (let n = 1; n < path.length; n++) {
+      const bp = path[n - 1];
+      if (bp.x < NET_X + BR) continue;
+      // Ground bump: try standing at a few spots around the ball.
+      for (let d = -6; d <= 30; d += 4) {
+        const px = Math.max(minX, Math.min(maxX, bp.x + d));
+        const dx = bp.x - px, dy = bp.y - (STAND_Y - 4), dist = Math.hypot(dx, dy);
+        if (dist > PR + BR - 2 || dist < 20 || !reach(px, n)) continue;
+        const nx = dx / dist;
+        const out = {
+          x: px + nx * (PR + BR + 1), y: STAND_Y - 4 + (dy / dist) * (PR + BR + 1),
+          vx: Math.max(-5, Math.min(5, nx * 5 - 0.9)), vy: -Math.max(6.2, Math.abs(bp.vy) * 0.4 + 5),
+        };
+        let sc = shotScore(out.x, out.y, out.vx, out.vy, opp);
+        if (sc === NO_SHOT && sets > 0 && out.x > NET_X + 20 && out.vx < 0) {
+          sets--;
+          // Keeps it on this side: worth it only if it sets up a good smash.
+          const next = bestShot(out, px, true, opp, false);
+          if (next && next.smash) sc = next.score - 10;
+        }
+        if (sc > NO_SHOT && (!best || sc > best.score)) best = { x: px, jumpAt: -1, smash: false, aim: 0, score: sc, n };
+      }
+      // Jump smash: meet the ball in the air.
+      if (bp.y < STAND_Y - 80 && onGround) {
+        let take = null; // can it be reached in the air at all?
+        for (let m = 6; m <= 26 && m <= n && !take; m += 2) {
+          const py = jumpY(m);
+          for (let d = -4; d <= 24; d += 7) {
+            const px = Math.max(minX, Math.min(maxX, bp.x + d));
+            if (Math.hypot(bp.x - px, bp.y - (py - 4)) <= PR + BR - 2 && reach(px, n)) { take = { px, m }; break; }
+          }
+        }
+        if (take) {
+          for (const aim of [1, 0, -1]) {
+            const sc = shotScore(bp.x, bp.y, -(aim ? 7.5 : 9.5), aim > 0 ? 6.5 : aim < 0 ? -6.5 : 2, opp);
+            if (sc > NO_SHOT && (!best || sc > best.score)) best = { x: take.px, jumpAt: n - take.m, smash: true, aim, score: sc, n };
+          }
+        }
+      }
+      if (best && n > best.n + 60) break; // later chances rarely beat an early one
+    }
+    return best;
+  }
+  function aiPlan() {
+    const me = state.p[1], opp = state.p[0], b = state.ball;
+    const home = { x: W * 0.74, jumpAt: -1, smash: false, aim: 0, score: 0 };
+    const path = simBall(b, 200);
+    if (!path.length || (path[path.length - 1].x < NET_X && b.vx <= 0)) return home; // their ball
+    const best = bestShot(b, me.x, me.ground, opp, true);
+    if (!best) {
+      // Nothing clean: get under where it will come down and hope for a bump.
+      const land = path[path.length - 1];
+      return { ...home, x: land.x > NET_X ? land.x + 12 : home.x };
+    }
+    if (best.jumpAt >= 0) best.jumpAt += state.t;
+    best.x += (Math.random() * 2 - 1) * AI_ERR;
+    // Now and then it misreads the ball completely, like a person would.
+    if (Math.random() < AI_MISREAD) { best.x += (Math.random() < 0.5 ? -1 : 1) * (25 + Math.random() * 20); best.smash = false; }
+    return best;
+  }
   function aiControl() {
     const me = state.p[1], b = state.ball, ai = state.ai;
     const c = {};
-    if (--ai.think <= 0) {
-      ai.think = 5 + Math.floor(Math.random() * 4);
-      const land = predictLanding();
-      // Stand a little behind the ball so the bump sends it over the net.
-      ai.targetX = land > NET_X ? land + 9 + Math.random() * 6 : W * 0.74;
-    }
-    const dx = ai.targetX - me.x;
-    if (Math.abs(dx) > 4) c[dx > 0 ? 'right' : 'left'] = true;
-    const near = Math.abs(b.x - me.x) < 46 && b.x > NET_X;
-    if (me.ground && near && b.y < me.y - 50 && b.y > me.y - 150 && b.vy > -2 && Math.random() < 0.55) {
-      c.up = true; c.upPressed = true;
-    }
-    if (!me.ground && Math.hypot(b.x - me.x, b.y - me.y) < 60 && b.x > me.x - 30 && Math.random() < 0.7) {
-      c.hit = true;
-      if (Math.random() < 0.55) c.down = true; else if (Math.random() < 0.3) c.up = true;
-    }
-    if (me.ground && b.x > NET_X && b.vy > 4 && Math.abs(predictLanding() - me.x) > 70 && Math.abs(predictLanding() - me.x) < 120 && b.y > 150) {
-      c.hitPressed = true; c[predictLanding() > me.x ? 'right' : 'left'] = true;
+    // Re-plan when the ball changes course (a hit, the net, a new rally), after a short reaction time.
+    const sig = Math.round(b.vx * 10) + ':' + state.rally;
+    if (sig !== ai.sig && ai.reaction <= 0) { ai.sig = sig; ai.reaction = AI_REACT + Math.floor(Math.random() * 4); ai.pending = true; }
+    if (ai.reaction > 0 && --ai.reaction === 0 && ai.pending && me.ground) { ai.pending = false; ai.plan = aiPlan(); }
+    if (ai.pending && ai.reaction <= 0 && me.ground) { ai.pending = false; ai.plan = aiPlan(); }
+    // Once committed to a jump, see it through until landing.
+    const committed = !me.ground || (ai.plan && ai.plan.smash && state.t >= ai.plan.jumpAt - 1);
+    if (!ai.plan || (--ai.think <= 0 && !ai.pending && !committed)) { ai.think = 20; ai.plan = aiPlan(); }
+    const plan = ai.plan;
+    const dx = plan.x - me.x;
+    if (Math.abs(dx) > 2.5) c[dx > 0 ? 'right' : 'left'] = true;
+    if (plan.smash) {
+      if (me.ground && plan.jumpAt >= 0 && state.t >= plan.jumpAt && state.t - plan.jumpAt < 6) { c.up = true; c.upPressed = true; }
+      if (!me.ground) {
+        c.hit = true;
+        c.up = plan.aim < 0; c.down = plan.aim > 0;
+      }
     }
     return c;
+  }
+
+  // `?bot` in single play: a stand-in for a person dragging 말랑 — it reacts
+  // ~12 frames late and moves at most 8px a frame.
+  const hb = { sig: '', wait: 0, tx: W * 0.26 };
+  function humanBot() {
+    const me = state.p[0], b = state.ball;
+    const sig = Math.round(b.vx * 10) + ':' + state.rally;
+    if (sig !== hb.sig) { hb.sig = sig; hb.wait = 12; }
+    if (hb.wait > 0 && --hb.wait === 0) { const land = predictLanding(); hb.tx = land < NET_X ? land - 10 : W * 0.26; }
+    return { follow: true, tx: me.x + Math.max(-8, Math.min(8, hb.tx - me.x)), ty: STAND_Y };
   }
 
   // `?bot`: a plain bumper for testing online play without hands.
@@ -1331,7 +1444,7 @@
   resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
   requestAnimationFrame(frame);
   // ?debug exposes the game state for troubleshooting from the console.
-  if (params.has('debug')) window.__fv = { state, net };
+  if (params.has('debug')) window.__fv = { state, net, step, startGame };
   // Opened from a friend's invite link: join their room right away.
   const invite = (params.get('room') || '').toUpperCase();
   if (/^[A-Z0-9]{4,8}$/.test(invite)) startFriend(invite, false);
