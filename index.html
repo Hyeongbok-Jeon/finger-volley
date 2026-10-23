@@ -267,7 +267,7 @@
   const params = new URLSearchParams(location.search);
   const SERVER = params.get('server') ||
     (['localhost', '127.0.0.1'].includes(location.hostname) ? 'ws://127.0.0.1:8787' : 'wss://finger-volley.shekel-vrooms-7p.workers.dev');
-  const net = { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, hitSeq: 0, guestSeq: 0, fx: [], ready: false, sendTick: 0, overShown: false };
+  const net = { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, pendingIce: [], hitSeq: 0, guestSeq: 0, fx: [], ready: false, sendTick: 0, overShown: false };
 
   for (const name of Object.keys(sfx)) {
     const play = sfx[name];
@@ -665,13 +665,14 @@
 
   const r1 = (v) => Math.round(v * 10) / 10;
   function sendSnapshot() {
+    const fx = net.fx.splice(0);
     send(net.room, {
       t: 's',
       p: state.p.map((pl) => [r1(pl.x), r1(pl.y), r1(pl.vx), r1(pl.vy), pl.ground ? 1 : 0, pl.dive, pl.diveDir, r1(pl.squash), pl.hitFlash]),
       b: [r1(state.ball.x), r1(state.ball.y), r1(state.ball.vx), r1(state.ball.vy), r1(state.ball.spin), state.ball.power],
       sc: state.score, fz: state.freeze, sl: state.slow, md: state.mode, rl: state.rally, f: state.t, gs: net.guestSeq,
-      fx: net.fx.splice(0),
-    });
+      fx,
+    }, fx.length > 0); // sounds and popups must not be lost
   }
   // Snap to a new authoritative position but keep drawing from where the
   // object appeared to be, then let that visual offset melt away.
@@ -685,6 +686,9 @@
     pl.vx = a[2]; pl.vy = a[3]; pl.ground = !!a[4]; pl.dive = a[5]; pl.diveDir = a[6]; pl.squash = a[7]; pl.hitFlash = a[8];
   }
   function applySnapshot(m) {
+    // The direct link may deliver out of order; drop snapshots older than the last.
+    if (m.f < net.lastF && net.lastF - m.f < 300) return;
+    net.lastF = m.f;
     const newRally = m.rl !== net.rl;
     net.rl = m.rl;
     // How many frames old this snapshot is. Packets arrive unevenly, so
@@ -819,12 +823,67 @@
     r.h = r.au = r.ad = 0;
   }
 
-  function send(ws, msg) {
+  // Game traffic goes straight to the other phone once the WebRTC link is up
+  // (much closer than the relay); until then, or if it fails, via the server.
+  const RELIABLE = new Set(['hit', 'again', 'restart']);
+  function send(ws, msg, reliable) {
+    const link = ws === net.room ? net.link : null;
+    const ch = link && (reliable || RELIABLE.has(msg.t) ? link.safe : link.fast);
+    if (ch && ch.readyState === 'open') { ch.send(JSON.stringify(msg)); return; }
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  }
+  const ICE = { iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] };
+  const rtcLog = [];
+  if (params.has('debug')) window.__rtcLog = rtcLog;
+  function sendSig(room, msg) { rtcLog.push('out ' + (msg.d ? msg.d.type : 'cand')); if (room.readyState === 1) room.send(JSON.stringify(msg)); }
+  function ensurePeer(room) {
+    if (net.pc || typeof RTCPeerConnection === 'undefined') return net.pc;
+    const pc = net.pc = new RTCPeerConnection(ICE);
+    const link = { fast: null, safe: null };
+    const adopt = (ch) => {
+      link[ch.label] = ch;
+      const check = link.check = () => { if (link.fast && link.safe && link.fast.readyState === 'open' && link.safe.readyState === 'open') net.link = link; };
+      ch.onopen = check;
+      ch.onclose = () => { if (net.link === link) net.link = null; };
+      ch.onmessage = (ev) => handleMsg(JSON.parse(ev.data), room);
+      check();
+    };
+    pc.onicecandidate = (e) => { if (e.candidate) sendSig(room, { t: 'sig', c: e.candidate }); };
+    pc.onconnectionstatechange = () => {
+      if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) { if (net.link === link) net.link = null; }
+      else if (pc.connectionState === 'connected' && link.check) link.check();
+    };
+    if (net.role === 'host') {
+      adopt(pc.createDataChannel('fast', { ordered: false, maxRetransmits: 0 }));
+      adopt(pc.createDataChannel('safe'));
+    } else pc.ondatachannel = (e) => adopt(e.channel);
+    return pc;
+  }
+  async function startRtc(room) {
+    rtcLog.push('start ' + net.role);
+    const pc = ensurePeer(room);
+    if (!pc || net.role !== 'host') return;
+    try { await pc.setLocalDescription(); sendSig(room, { t: 'sig', d: pc.localDescription }); } catch (e) { rtcLog.push('err ' + e.message); }
+  }
+  async function onSignal(r, room) {
+    const pc = ensurePeer(room);
+    if (!pc) return;
+    rtcLog.push('in ' + (r.d ? r.d.type : 'cand'));
+    try {
+      if (r.d) {
+        await pc.setRemoteDescription(r.d);
+        if (r.d.type === 'offer') { await pc.setLocalDescription(); sendSig(room, { t: 'sig', d: pc.localDescription }); }
+        // Candidates can overtake the description; they waited here.
+        for (const c of net.pendingIce.splice(0)) await pc.addIceCandidate(c);
+      } else if (r.c) {
+        if (pc.remoteDescription) await pc.addIceCandidate(r.c); else net.pendingIce.push(r.c);
+      }
+    } catch (e) { rtcLog.push('err ' + e.message); }
   }
   function closeNet() {
     for (const ws of [net.lobby, net.room]) { if (ws) { ws.onclose = null; try { ws.close(); } catch {} } }
-    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, rtt: 0, clk: null, localHit: null, hitSeq: 0, guestSeq: 0, pendHit: false, pendUp: false, pendDown: false, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
+    if (net.pc) { try { net.pc.close(); } catch {} }
+    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, rtt: 0, pendingIce: [], pc: null, link: null, lastF: 0, clk: null, localHit: null, hitSeq: 0, guestSeq: 0, pendHit: false, pendUp: false, pendDown: false, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
     document.getElementById('roomCode').hidden = true;
     document.getElementById('shareRoom').hidden = true;
   }
@@ -873,8 +932,10 @@
   function attachRoom(room) {
     room.onclose = () => { if (state.online || net.room === room) endOnline('연결이 끊겼어요.'); };
     room.onerror = () => { if (net.room === room) endOnline('서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.'); };
-    room.onmessage = (ev) => {
-      const r = JSON.parse(ev.data);
+    room.onmessage = (ev) => handleMsg(JSON.parse(ev.data), room);
+  }
+  function handleMsg(r, room) {
+    {
       if (r.type === 'role') {
         net.role = r.role; net.me = r.role === 'host' ? 0 : 1;
       } else if (r.type === 'full') {
@@ -886,6 +947,9 @@
           document.getElementById('shareRoom').hidden = true;
         }
         beginOnline();
+        startRtc(room);
+      } else if (r.t === 'sig') {
+        onSignal(r, room);
       } else if (r.type === 'left') {
         endOnline(net.friend ? '친구가 나갔어요.' : '상대가 나갔어요.');
       } else if (r.t === 'i' && net.role === 'host') {
@@ -906,7 +970,7 @@
       } else if (r.t === 'restart' && net.role === 'guest') {
         restartFriendGame();
       }
-    };
+    }
   }
 
   // ---- Friends: a private room shared by link ----
