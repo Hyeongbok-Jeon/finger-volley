@@ -117,6 +117,28 @@
     color: var(--sun) !important;
     opacity: 1 !important;
   }
+  .my-rank { font-size: clamp(12px, 2.8vw, 14px); color: var(--sun); cursor: pointer; background: none; border: 0; font-family: var(--body); padding: 2px 6px; }
+  .nick-input {
+    font-family: var(--display); font-size: clamp(18px, 4vw, 24px); text-align: center;
+    width: min(70%, 260px); padding: 8px 14px; border-radius: 999px; border: 2px solid var(--mist);
+    background: rgba(255, 255, 255, 0.94); color: #10283D;
+  }
+  .nick-input:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
+  .board-list {
+    list-style: none; margin: 0; padding: 0; width: min(92%, 380px);
+    max-height: 64%; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain;
+    font-size: clamp(12px, 2.8vw, 15px); text-align: left;
+    background: rgba(9, 28, 46, 0.55); border-radius: 12px;
+  }
+  #board { gap: 8px; padding-block: 10px; }
+  #board h2 { font-size: clamp(22px, 5.5vw, 34px); }
+  #board .note:empty, #board .note[hidden] { display: none; }
+  .board-list li { display: grid; grid-template-columns: 2.2em 1fr auto auto; gap: 8px; padding: 5px 12px; align-items: baseline; }
+  .board-list li + li { border-top: 1px solid var(--line); }
+  .board-list li.me { background: rgba(255, 211, 107, 0.3); }
+  .board-list .no { color: var(--mist); font-variant-numeric: tabular-nums; }
+  .board-list .rt { font-family: var(--display); color: var(--sun); font-variant-numeric: tabular-nums; }
+  .board-list .wl { color: var(--mist); font-size: 0.85em; font-variant-numeric: tabular-nums; }
   .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #C99A2E; }
   .btn:focus-visible { outline: 3px solid var(--mint); outline-offset: 3px; }
 
@@ -170,8 +192,30 @@
         <button class="btn" id="play1" type="button">혼자 하기</button>
         <button class="btn online" id="playOnline" type="button">온라인 대결</button>
         <button class="btn alt" id="playFriend" type="button">친구와 하기</button>
+        <button class="btn alt" id="openBoard" type="button">랭킹</button>
       </div>
+      <button class="my-rank" id="myRank" type="button" hidden></button>
       <p id="menuNote" class="note" hidden></p>
+    </div>
+    <div class="overlay" id="nick" hidden>
+      <h2>닉네임</h2>
+      <p id="nickHelp">랭킹에 보여질 이름이에요. 12자까지 쓸 수 있어요.</p>
+      <input id="nickInput" class="nick-input" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="이름" aria-label="닉네임">
+      <p id="nickErr" class="note" hidden></p>
+      <div class="choices">
+        <button class="btn online" id="nickOk" type="button">확인</button>
+        <button class="btn alt" id="nickSkip" type="button">랭킹 없이 하기</button>
+        <button class="btn alt" id="nickBack" type="button">뒤로</button>
+      </div>
+    </div>
+    <div class="overlay" id="board" hidden>
+      <h2>랭킹</h2>
+      <ol class="board-list" id="boardList"></ol>
+      <p id="boardNote" class="note"></p>
+      <div class="choices">
+        <button class="btn alt" id="boardRename" type="button">닉네임 바꾸기</button>
+        <button class="btn" id="boardClose" type="button">닫기</button>
+      </div>
     </div>
     <div class="overlay" id="matching" hidden>
       <h2 id="matchTitle">상대를 찾는 중…</h2>
@@ -185,6 +229,7 @@
     <div class="overlay" id="over" hidden>
       <h2 id="winner">말랑 승리!</h2>
       <p id="final">15 : 9</p>
+      <p id="rankDelta" class="note" hidden></p>
       <div class="choices">
         <button class="btn" id="again" type="button">한 판 더</button>
         <button class="btn alt" id="toMenu" type="button">처음으로</button>
@@ -996,7 +1041,7 @@
   function closeNet() {
     for (const ws of [net.lobby, net.room]) { if (ws) { ws.onclose = null; try { ws.close(); } catch {} } }
     if (net.pc) { try { net.pc.close(); } catch {} }
-    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, rtt: 0, pendingIce: [], pc: null, link: null, lastF: 0, clk: null, localHit: null, hitSeq: 0, guestSeq: 0, pendHit: false, pendUp: false, pendDown: false, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
+    Object.assign(net, { lobby: null, room: null, role: null, me: 0, remotePose: null, rl: null, rtt: 0, ranked: false, opp: null, roomId: null, reported: false, ratingBefore: null, pendingIce: [], pc: null, link: null, lastF: 0, clk: null, localHit: null, hitSeq: 0, guestSeq: 0, pendHit: false, pendUp: false, pendDown: false, fx: [], ready: false, overShown: false, friend: false, code: null, wantAgain: false, peerAgain: false });
     document.getElementById('roomCode').hidden = true;
     document.getElementById('shareRoom').hidden = true;
   }
@@ -1010,6 +1055,120 @@
     note.hidden = !message;
     resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
   }
+  // ---- Ranking: an anonymous id, a nickname, and ratings kept on the server ----
+  const RANK_API = SERVER.replace(/^ws/, 'http');
+  let ident = null;      // { pid, secret, name } once a nickname is set
+  let myStats = null;    // last { name, rating, wins, losses, games, rank, total }
+  try { ident = JSON.parse(localStorage.getItem('fv.id')); } catch {}
+  if (!ident || !ident.pid || !ident.secret) ident = null;
+  const randomHex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  async function rankApi(path, body, keepalive) {
+    try {
+      const res = await fetch(RANK_API + path, body ? { method: 'POST', body: JSON.stringify(body), keepalive: !!keepalive } : undefined);
+      return res.ok ? await res.json() : null;
+    } catch { return null; }
+  }
+  function showMyRank() {
+    const el = document.getElementById('myRank');
+    if (!ident) { el.hidden = true; return; }
+    const st = myStats;
+    el.textContent = st ? `${ident.name} · 레이팅 ${st.rating}${st.rank ? ` · ${st.rank}위` : ''}` : ident.name;
+    el.hidden = false;
+  }
+  async function refreshMe() {
+    if (!ident) return null;
+    let me = await rankApi(`/rank/me?pid=${ident.pid}`);
+    if (!me) me = await rankApi('/rank/register', ident); // the server lost us (or is new): sign up again
+    if (me) { myStats = me; showMyRank(); }
+    return me;
+  }
+  async function saveNickname(name) {
+    const next = ident ? { ...ident, name } : { pid: randomHex(), secret: randomHex(), name };
+    const me = await rankApi('/rank/register', next);
+    if (!me) return false;
+    ident = { ...next, name: me.name };
+    try { localStorage.setItem('fv.id', JSON.stringify(ident)); } catch {}
+    myStats = { ...(myStats || {}), ...me };
+    showMyRank();
+    refreshMe();
+    return true;
+  }
+  const nickBox = document.getElementById('nick'), boardBox = document.getElementById('board');
+  let nickThen = null; // what to do once a nickname is saved
+  function askNickname(then, renaming) {
+    nickThen = then;
+    menu.hidden = true; over.hidden = true; boardBox.hidden = true; nickBox.hidden = false;
+    document.getElementById('nickSkip').hidden = !!renaming;
+    document.getElementById('nickErr').hidden = true;
+    const input = document.getElementById('nickInput');
+    input.value = ident ? ident.name : '';
+    setTimeout(() => input.focus(), 50);
+  }
+  async function submitNickname() {
+    const input = document.getElementById('nickInput'), err = document.getElementById('nickErr');
+    const name = input.value.replace(/\s+/g, ' ').trim();
+    if (!name) { err.textContent = '이름을 적어 주세요.'; err.hidden = false; return; }
+    const btn = document.getElementById('nickOk');
+    btn.disabled = true;
+    const ok = await saveNickname(name);
+    btn.disabled = false;
+    if (!ok) { err.textContent = '서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.'; err.hidden = false; return; }
+    nickBox.hidden = true;
+    const then = nickThen; nickThen = null;
+    if (then) then(); else menu.hidden = false;
+  }
+  async function openBoard() {
+    menu.hidden = true; boardBox.hidden = false;
+    const list = document.getElementById('boardList'), note = document.getElementById('boardNote');
+    list.innerHTML = ''; note.textContent = '불러오는 중…'; note.hidden = false;
+    const [data] = await Promise.all([rankApi('/rank/top'), refreshMe()]);
+    if (!data) { note.textContent = '랭킹을 불러올 수 없어요.'; return; }
+    note.hidden = data.top.length > 0;
+    note.textContent = '아직 아무도 없어요. 온라인 대결로 첫 기록을 남겨 보세요!';
+    let mine = null;
+    data.top.forEach((p, i) => {
+      const li = document.createElement('li');
+      const cells = [['no', String(i + 1)], ['', p.name], ['rt', String(p.rating)], ['wl', `${p.wins}승 ${p.losses}패`]];
+      for (const [cls, text] of cells) { const sp = document.createElement('span'); if (cls) sp.className = cls; sp.textContent = text; li.appendChild(sp); }
+      if (ident && p.pid === ident.pid) { li.className = 'me'; if (i >= 6) mine = li; }
+      list.appendChild(li);
+    });
+    if (mine) mine.scrollIntoView({ block: 'nearest' });
+    if (myStats && myStats.rank && myStats.rank > data.top.length) {
+      note.hidden = false;
+      note.textContent = `내 순위: ${myStats.rank}위 (레이팅 ${myStats.rating})`;
+    }
+  }
+  // Tell the server how my ranked game ended (it needs both players' word).
+  function reportResult(result, keepalive) {
+    if (!net.ranked || net.reported || !ident || !net.roomId) return;
+    net.reported = true;
+    const body = { room: net.roomId, pid: ident.pid, secret: ident.secret, result };
+    (async function send(tries) {
+      const ok = await rankApi('/rank/report', body, keepalive);
+      if (!ok && tries > 0 && !keepalive) setTimeout(() => send(tries - 1), 2000);
+    })(3);
+  }
+  // After a ranked game: wait for the server to apply it, then show the change.
+  async function showRatingChange(before) {
+    const el = document.getElementById('rankDelta');
+    el.textContent = '레이팅 계산 중…'; el.hidden = false;
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (over.hidden) return; // left the result screen
+      const me = await rankApi(`/rank/me?pid=${ident.pid}`);
+      if (me && me.games > before.games) {
+        myStats = me; showMyRank();
+        const d = me.rating - before.rating;
+        el.textContent = `레이팅 ${before.rating} → ${me.rating} (${d >= 0 ? '+' : ''}${d})${me.rank ? ` · ${me.rank}위` : ''}`;
+        return;
+      }
+    }
+    el.textContent = '결과가 아직 반영되지 않았어요. 상대의 보고를 기다리는 중이에요.';
+  }
+  refreshMe();
+  window.addEventListener('pagehide', () => { if (state.online && net.ranked && state.mode === 'play') reportResult('loss', true); });
+
   function startOnline() {
     ensureAudio();
     closeNet();
@@ -1019,6 +1178,7 @@
     let lobby;
     try { lobby = new WebSocket(`${SERVER}/match`); } catch { endOnline('서버에 연결할 수 없어요.'); return; }
     net.lobby = lobby;
+    if (ident && !params.has('bot')) lobby.onopen = () => lobby.send(JSON.stringify({ type: 'hello', pid: ident.pid, secret: ident.secret }));
     lobby.onerror = () => endOnline('서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.');
     lobby.onclose = () => { if (!net.room) endOnline('연결이 끊겼어요.'); };
     lobby.onmessage = (e) => {
@@ -1026,8 +1186,12 @@
       if (m.type !== 'matched') return;
       lobby.onclose = null;
       net.role = m.role; net.me = m.role === 'host' ? 0 : 1;
+      net.ranked = !!m.ranked && !!ident; net.opp = m.opp || null; net.roomId = m.room; net.reported = false;
+      net.ratingBefore = myStats ? { rating: myStats.rating, games: myStats.games } : null;
       document.getElementById('matchTitle').textContent = '상대를 찾았어요!';
-      document.getElementById('matchInfo').textContent = `나는 ${net.me === 0 ? '말랑(왼쪽)' : '몽글(오른쪽)'}이에요.`;
+      document.getElementById('matchInfo').textContent = net.ranked
+        ? `${m.opp.name} (레이팅 ${m.opp.rating}) · 나는 ${net.me === 0 ? '말랑(왼쪽)' : '몽글(오른쪽)'}이에요.`
+        : `나는 ${net.me === 0 ? '말랑(왼쪽)' : '몽글(오른쪽)'}이에요.`;
       const room = new WebSocket(`${SERVER}/room/${m.room}?role=${m.role}`);
       net.room = room;
       attachRoom(room);
@@ -1064,6 +1228,7 @@
       } else if (r.t === 'sig') {
         onSignal(r, room);
       } else if (r.type === 'left') {
+        if (state.mode === 'play' && net.ranked) reportResult('win');
         endOnline(net.friend ? '친구가 나갔어요.' : '상대가 나갔어요.');
       } else if (r.t === 'i' && net.role === 'host') {
         // Ignore poses from before the last reset so the serve starts clean.
@@ -1141,7 +1306,9 @@
   }
   function beginOnline() {
     net.ready = true;
+    const room = net.room;
     setTimeout(() => {
+      if (net.room !== room) return; // left or re-queued in the meantime
       matching.hidden = true;
       startGame(false);
       state.online = true;
@@ -1340,8 +1507,9 @@
     });
     ctx.font = '13px Jua, sans-serif';
     ctx.fillStyle = '#0E2A44';
+    const oppName = net.ranked && net.opp ? net.opp.name : null;
     const names = state.online
-      ? [net.me === 0 ? '말랑 (나)' : '말랑 (상대)', net.me === 1 ? '몽글 (나)' : '몽글 (상대)']
+      ? [net.me === 0 ? '말랑 (나)' : `말랑 (${oppName || '상대'})`, net.me === 1 ? '몽글 (나)' : `몽글 (${oppName || '상대'})`]
       : ['말랑', state.single ? '몽글 (컴퓨터)' : '몽글'];
     ctx.fillText(names[0], W * 0.25, 62); ctx.fillText(names[1], W * 0.75, 62);
     for (const p of state.popups) {
@@ -1408,11 +1576,16 @@
       const iWon = (a > b) === (net.me === 0);
       document.getElementById('winner').textContent = iWon ? '내가 이겼어요!' : '아쉽게 졌어요';
       document.getElementById('again').textContent = net.friend ? '한 판 더' : '새 상대 찾기';
+      if (net.ranked && ident) {
+        reportResult(iWon ? 'win' : 'loss');
+        if (net.ratingBefore) showRatingChange(net.ratingBefore);
+      }
     } else {
       document.getElementById('winner').textContent = a > b ? '말랑 승리!' : (state.single ? '몽글(컴퓨터) 승리!' : '몽글 승리!');
       document.getElementById('again').textContent = '한 판 더';
     }
     document.getElementById('final').textContent = `${a} : ${b}`;
+    if (!(state.online && net.ranked)) document.getElementById('rankDelta').hidden = true;
     over.hidden = false;
   }
   function togglePause() {
@@ -1432,7 +1605,15 @@
     if (state.online) { endOnline(); return; }
     state.mode = 'menu'; over.hidden = true; menu.hidden = false; resetRally(0); state.ball.vx = 3; state.ball.vy = -6;
   });
-  document.getElementById('playOnline').addEventListener('click', startOnline);
+  document.getElementById('playOnline').addEventListener('click', () => { if (ident) startOnline(); else askNickname(startOnline, false); });
+  document.getElementById('nickOk').addEventListener('click', submitNickname);
+  document.getElementById('nickInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) submitNickname(); e.stopPropagation(); });
+  document.getElementById('nickSkip').addEventListener('click', () => { nickBox.hidden = true; nickThen = null; startOnline(); });
+  document.getElementById('nickBack').addEventListener('click', () => { nickBox.hidden = true; nickThen = null; menu.hidden = false; });
+  document.getElementById('openBoard').addEventListener('click', openBoard);
+  document.getElementById('boardClose').addEventListener('click', () => { boardBox.hidden = true; menu.hidden = false; });
+  document.getElementById('boardRename').addEventListener('click', () => askNickname(openBoard, true));
+  document.getElementById('myRank').addEventListener('click', () => askNickname(null, true));
   document.getElementById('cancelMatch').addEventListener('click', () => endOnline());
   document.getElementById('pause').addEventListener('click', togglePause);
   document.getElementById('sound').addEventListener('click', (e) => {
